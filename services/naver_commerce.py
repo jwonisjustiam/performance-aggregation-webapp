@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 import base64
 import os
 import time as time_module
@@ -202,12 +202,19 @@ def orders_to_raw_data(items: list[dict[str, Any]], account: NaverAccount) -> pd
 
 
 def fetch_raw_data(kind: str, start_date: date, end_date: date) -> pd.DataFrame:
-    """Fetch exactly one category account and assert that its tag never changes."""
+    """Fetch one account in daily windows because Naver limits a request to 24 hours."""
+    if end_date < start_date:
+        raise ValueError("조회 종료일은 시작일보다 빠를 수 없습니다.")
     account = load_account(kind)
     timezone = ZoneInfo("Asia/Seoul")
-    start_at = datetime.combine(start_date, time.min, tzinfo=timezone)
-    end_at = datetime.combine(end_date, time.max, tzinfo=timezone)
-    items = NaverCommerceClient(account).fetch_paid_orders(start_at, end_at)
+    client = NaverCommerceClient(account)
+    items: list[dict[str, Any]] = []
+    current_date = start_date
+    while current_date <= end_date:
+        start_at = datetime.combine(current_date, time.min, tzinfo=timezone)
+        end_at = start_at + timedelta(days=1) - timedelta(milliseconds=1)
+        items.extend(client.fetch_paid_orders(start_at, end_at))
+        current_date += timedelta(days=1)
     frame = orders_to_raw_data(items, account)
     if not frame.empty and set(frame["API 계정 유형"].dropna()) != {kind}:
         raise RuntimeError("API 계정 유형이 혼합되어 수집을 중단했습니다.")

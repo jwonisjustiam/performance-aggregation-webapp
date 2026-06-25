@@ -25,6 +25,23 @@ ACCOUNT_LABELS = {
     "wearable": "웨어러블",
     "external": "외장하드",
 }
+RAW_COLUMNS = [
+    "주문번호",
+    "상품주문번호",
+    "결제일시",
+    "상품명",
+    "수량",
+    "옵션관리코드",
+    "판매자 상품코드",
+    "옵션 정보",
+    "상품가격",
+    "옵션가격",
+    "최종 상품별 총 주문금액",
+    "주문 유입경로",
+    "상품 주문 상태",
+    "API 계정 유형",
+    "API 계정명",
+]
 
 
 @dataclass(frozen=True)
@@ -159,6 +176,9 @@ def orders_to_raw_data(items: list[dict[str, Any]], account: NaverAccount) -> pd
         total_amount = product.get("totalPaymentAmount")
         if total_amount is None:
             total_amount = product.get("initialPaymentAmount")
+        inflow_path = product.get("inflowPath")
+        if "쇼핑라이브" in str(inflow_path or ""):
+            inflow_path = "쇼핑라이브"
         rows.append(
             {
                 "주문번호": order.get("orderId"),
@@ -172,13 +192,13 @@ def orders_to_raw_data(items: list[dict[str, Any]], account: NaverAccount) -> pd
                 "상품가격": product.get("unitPrice"),
                 "옵션가격": product.get("optionPrice"),
                 "최종 상품별 총 주문금액": total_amount,
-                "주문 유입경로": product.get("inflowPath"),
+                "주문 유입경로": inflow_path,
                 "상품 주문 상태": product.get("productOrderStatus"),
                 "API 계정 유형": account.kind,
                 "API 계정명": account.name,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=RAW_COLUMNS)
 
 
 def fetch_raw_data(kind: str, start_date: date, end_date: date) -> pd.DataFrame:

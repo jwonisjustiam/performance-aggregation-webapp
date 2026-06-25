@@ -236,3 +236,12 @@ if uploaded_files or api_frame is not None:
                 st.caption(f"저장 후 검증: {validation}")
             except Exception as exc:
                 st.error(f"처리할 수 없습니다: {exc}")
+import requests
+
+if st.button("서버 IP 확인"):
+    server_ip = requests.get(
+        "https://api.ipify.org",
+        timeout=10,
+    ).text.strip()
+
+    st.info(f"Streamlit 서버 IP: {server_ip}")

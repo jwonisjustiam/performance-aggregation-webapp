@@ -1,0 +1,12 @@
+.venv/
+node_modules/
+__pycache__/
+.pytest_cache/
+.env
+*.py[cod]
+outputs/*
+!outputs/.gitkeep
+samples/weekly/*.xlsx
+samples/samsung/*.xlsx
+*.log
+*.png

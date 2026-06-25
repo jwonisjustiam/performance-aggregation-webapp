@@ -244,4 +244,4 @@ if st.button("서버 IP 확인"):
         timeout=10,
     ).text.strip()
 
-    st.info(f"Streamlit 서버 IP: {server_ip}")
+    st.info(f"Streamlit 서버 IP: {35.197.92.111}")

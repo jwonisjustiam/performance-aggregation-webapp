@@ -15,7 +15,7 @@ from services.validator import input_diagnostics
 
 st.set_page_config(page_title="삼성 라이브 실적 정리 도구", page_icon="📊", layout="wide")
 st.title("삼성 라이브 실적 정리 도구")
-st.write("Raw Data를 업로드하면 규칙에 따라 실적을 자동 집계 후 결과 엑셀 파일을 생성합니다.")
+st.write("Raw Data를 업로드하면 규칙에 따라 실적을 정리하고 결과 파일을 생성합니다.")
 
 with st.expander("사용 안내", expanded=True):
     st.markdown(
@@ -32,6 +32,8 @@ with st.expander("사용 안내", expanded=True):
         - 여러 파일에 같은 주문이나 동일한 행이 있어도 중복 제거 규칙을 적용합니다.
         - 삼성 방송 실적표는 선택 사항이며, 주문 Raw Data는 반드시 업로드해야 합니다.
         - 암호화 파일은 기본 비밀번호 `1234`, `0000` 순서로만 열기를 시도합니다.
+        - 파일명 양식 예시 : 외장하드_20260625_데이터_1
+
         """
     )
 

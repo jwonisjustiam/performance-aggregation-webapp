@@ -13,9 +13,9 @@ from services.excel_reader import XLS_ERROR, read_xlsx
 from services.excel_writer import create_result_workbook
 from services.validator import input_diagnostics
 
-st.set_page_config(page_title="실적 취합 자동화 웹앱", page_icon="📊", layout="wide")
-st.title("실적 취합 자동화 웹앱")
-st.write("엑셀 Raw Data를 업로드하면 업무 유형별 규칙에 따라 실적을 자동 집계하고 결과 엑셀 파일을 생성합니다.")
+st.set_page_config(page_title="삼성 라이브 실적 정리 도구", page_icon="📊", layout="wide")
+st.title("삼성 라이브 실적 정리 도구")
+st.write("Raw Data를 업로드하면 규칙에 따라 실적을 자동 집계 후 결과 엑셀 파일을 생성합니다.")
 
 with st.expander("사용 안내", expanded=True):
     st.markdown(

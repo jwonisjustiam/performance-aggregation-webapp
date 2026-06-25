@@ -9,8 +9,10 @@ import pandas as pd
 import streamlit as st
 
 from processors import process_samsung, process_weekly
+from processors.weekly_processor import infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_xlsx
 from services.excel_writer import create_result_workbook
+from services.result_formatter import build_download_filename
 from services.validator import input_diagnostics
 
 st.set_page_config(page_title="삼성 라이브 실적 정리 도구", page_icon="📊", layout="wide")
@@ -39,8 +41,15 @@ with st.expander("사용 안내", expanded=True):
         """
     )
 
-job_label = st.radio("업무 유형", ["위클리 실적 취합", "삼성 실적 취합"], horizontal=True)
+job_column, type_column = st.columns([2, 1])
+with job_column:
+    job_label = st.radio("업무 유형", ["위클리 실적 취합", "삼성 실적 취합"], horizontal=True)
 job_type = "weekly" if job_label.startswith("위클리") else "samsung"
+weekly_type = None
+with type_column:
+    if job_type == "weekly":
+        weekly_type = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
+
 uploaded_files = st.file_uploader(
     "주문 Raw Data (.xlsx, 1개 이상)",
     type=None,
@@ -49,9 +58,6 @@ uploaded_files = st.file_uploader(
 broadcast_uploaded = None
 if job_type == "samsung":
     broadcast_uploaded = st.file_uploader("방송 실적표 (.xlsx, 선택)", type=None, key="broadcast")
-weekly_type = None
-if job_type == "weekly":
-    weekly_type = st.selectbox("파일명으로 유형을 판정할 수 없을 때 적용할 유형", ["자동 판정", "외장하드", "웨어러블"])
 
 if uploaded_files:
     with tempfile.TemporaryDirectory() as temporary:
@@ -108,21 +114,23 @@ if uploaded_files:
         }
         st.subheader("파일 기본 정보")
         st.dataframe(pd.DataFrame(file_info_rows), use_container_width=True, hide_index=True)
-        st.subheader("통합 원본 정보")
-        st.dataframe(pd.DataFrame(info.items(), columns=["항목", "값"]), use_container_width=True, hide_index=True)
-        if len(payment.dropna()):
-            daily = payment.dt.date.value_counts().sort_index().rename_axis("날짜").reset_index(name="원본 행 수")
-            st.dataframe(daily, use_container_width=True, hide_index=True)
+        with st.expander("통합 원본 정보", expanded=False):
+            st.dataframe(pd.DataFrame(info.items(), columns=["항목", "값"]), use_container_width=True, hide_index=True)
+            if len(payment.dropna()):
+                daily = payment.dt.date.value_counts().sort_index().rename_axis("날짜").reset_index(name="원본 행 수")
+                st.dataframe(daily, use_container_width=True, hide_index=True)
 
         required = ["주문번호", "결제일시", "상품명", "주문 유입경로"]
         diagnostics = input_diagnostics(frame, required)
-        st.subheader("파일 검사 결과")
-        st.json(diagnostics)
+        with st.expander("파일 검사 결과", expanded=False):
+            st.json(diagnostics)
 
         if st.button("분석 시작", type="primary"):
             try:
+                weekly_kind = None
                 if job_type == "weekly":
                     selected = {"외장하드": "external", "웨어러블": "wearable"}.get(weekly_type)
+                    weekly_kind = infer_weekly_kind(combined_names, selected)
                     result = process_weekly(frame, combined_names, selected)
                 else:
                     broadcast_frame = None
@@ -136,6 +144,7 @@ if uploaded_files:
                             common = len(set(frame["주문번호"].dropna()) & set(broadcast_frame["주문번호"].dropna()))
                             st.info(f"주문 원본과 방송 실적표의 공통 주문번호: {common}건")
                     result = process_samsung(frame, optional_broadcast_df=broadcast_frame)
+                download_name = build_download_filename(job_type, result, payment, weekly_kind)
                 content, validation = create_result_workbook(job_type, result)
                 st.success("분석과 저장 후 재검증을 완료했습니다.")
                 st.dataframe(result["final"], use_container_width=True, hide_index=True)
@@ -145,7 +154,7 @@ if uploaded_files:
                 st.download_button(
                     "결과 엑셀 다운로드",
                     data=content,
-                    file_name=f"{job_type}_result.xlsx",
+                    file_name=download_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
                 st.caption(f"저장 후 검증: {validation}")

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from processors.weekly_processor import infer_weekly_kind, process_weekly
+from processors.weekly_processor import infer_weekly_kind, process_detail, process_weekly
 
 
 def test_unique_order_count_and_multiple_line_amount(weekly_frame: pd.DataFrame) -> None:
@@ -65,3 +65,20 @@ def test_disabled_wearable_session_orders_are_excluded() -> None:
     result = process_weekly(frame, "웨어러블.xlsx")
     assert result["final"].query("시간 == '13:50'")["수량"].iloc[0] == 0
     assert len(result["excluded"]) == 1
+
+
+def test_detail_uses_weekly_rules_and_falls_back_to_seller_code() -> None:
+    frame = pd.DataFrame(
+        [
+            ["A", "2026-07-07 14:00", "상품A", "", "SELLER-A", 1_000_000, 0, "쇼핑라이브"],
+            ["B", "2026-07-07 14:00", "상품B", "OPT-B", "SELLER-B", 500_000, 0, "쇼핑라이브"],
+            ["C", "2026-07-07 14:00", "상품C", "OPT-C", "SELLER-C", 500_000, 0, "검색"],
+        ],
+        columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
+    )
+    result = process_detail(frame, "외장하드.xlsx", "external")
+    final = result["final"]
+    assert list(final.columns) == ["날짜", "시간", "주문번호", "상품명", "옵션 관리 코드", "금액"]
+    assert set(final["주문번호"]) == {"A", "B"}
+    assert final.loc[final["주문번호"] == "A", "옵션 관리 코드"].iloc[0] == "SELLER-A"
+    assert final.loc[final["주문번호"] == "B", "옵션 관리 코드"].iloc[0] == "OPT-B"

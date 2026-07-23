@@ -17,6 +17,10 @@ def test_streamlit_entrypoint_and_docs() -> None:
 
     assert "import streamlit as st" in app_source
     assert "사용 안내" in app_source
+    assert "삼성 취합" in app_source
+    assert "위클리 취합" in app_source
+    assert "상세 취합" in app_source
+    assert "방송 실적표" not in app_source
     assert "네이버 API 자동 수집" not in app_source
     assert "fetch_raw_data" not in app_source
     assert "streamlit==" in requirements
@@ -41,6 +45,28 @@ def test_weekly_sample_can_create_downloadable_workbook() -> None:
     workbook = load_workbook(path, read_only=True)
     try:
         assert workbook.sheetnames == ["회차별 합계"]
+    finally:
+        workbook.close()
+        path.unlink(missing_ok=True)
+
+
+def test_detail_workbook_sheet_is_created() -> None:
+    raw = pd.DataFrame(
+        [["A", "2026-07-07 14:00", "외장하드", "", "SELLER-A", 1_000_000, 0, "쇼핑라이브"]],
+        columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
+    )
+    from processors.weekly_processor import process_detail
+
+    result = process_detail(raw, "외장하드.xlsx", "external")
+    content, validation = create_result_workbook("detail", result)
+
+    assert validation["valid"] is True
+
+    path = ROOT / "outputs" / "_test_streamlit_detail.xlsx"
+    path.write_bytes(content)
+    workbook = load_workbook(path, read_only=True)
+    try:
+        assert workbook.sheetnames == ["상세 취합"]
     finally:
         workbook.close()
         path.unlink(missing_ok=True)

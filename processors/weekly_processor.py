@@ -35,8 +35,18 @@ def _is_live(row: pd.Series) -> bool:
     return any(str(value).strip() == "0" and index + 1 < len(values) and str(values[index + 1]).strip() == "쇼핑라이브" for index, value in enumerate(values))
 
 
-def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
-    """Aggregate a weekly raw-order dataframe by broadcast date and slot."""
+def _selected_option_code(row: pd.Series) -> str:
+    option_code = str(row.get("옵션관리코드", "") or "").strip()
+    seller_code = str(row.get("판매자 상품코드", "") or "").strip()
+    return option_code or seller_code
+
+
+def _prepare_weekly_source(
+    raw_df: pd.DataFrame,
+    file_name: str,
+    selected_type: str | None,
+) -> tuple[str, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Apply shared weekly/detail inclusion rules and return prepared frames."""
     missing = missing_columns(raw_df, REQUIRED)
     if missing:
         raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
@@ -75,7 +85,13 @@ def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
     invalid = invalid_order | source["_payment"].isna() | ~source["_live"] | source["_slot"].isna() | source["_disabled_slot"] | source["_amount"].isna()
     excluded = source.loc[invalid].copy()
     included = source.loc[~invalid].copy()
+    errors = source.loc[source["_payment"].isna() | source["_amount"].isna()].copy()
+    return kind, source, included, excluded, duplicates, errors
 
+
+def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
+    """Aggregate a weekly raw-order dataframe by broadcast date and slot."""
+    kind, source, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type)
     dates = sorted(date_value for date_value in source["_broadcast_date"].dropna().unique())
     rows: list[dict[str, object]] = []
     for broadcast_date in dates:
@@ -91,5 +107,27 @@ def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
                 }
             )
     final = pd.DataFrame(rows, columns=["날짜", "시간", "수량", "전환율", "금액(백만)"])
-    errors = source.loc[source["_payment"].isna() | source["_amount"].isna()].copy()
+    return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}
+
+
+def process_detail(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
+    """Create a detail-level output using the same inclusion rules as weekly aggregation."""
+    _, _, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type)
+    detail = included.copy()
+    if detail.empty:
+        final = pd.DataFrame(columns=["날짜", "시간", "주문번호", "상품명", "옵션 관리 코드", "금액"])
+    else:
+        detail["_selected_option_code"] = detail.apply(_selected_option_code, axis=1)
+        final = detail.assign(
+            날짜=detail["_broadcast_date"],
+            시간=detail["_slot"],
+            **{
+                "옵션 관리 코드": detail["_selected_option_code"],
+                "금액": detail["_amount"],
+            },
+        )
+        final = final[["날짜", "시간", "주문번호", "상품명", "옵션 관리 코드", "금액"]].sort_values(
+            ["날짜", "시간", "주문번호", "상품명"],
+            kind="stable",
+        )
     return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}

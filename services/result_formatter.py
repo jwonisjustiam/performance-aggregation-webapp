@@ -31,6 +31,9 @@ def build_download_filename(
     if job_type == "weekly":
         label = {"external": "외장하드", "wearable": "웨어러블"}.get(weekly_kind, "위클리")
         dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
+    elif job_type == "detail":
+        label = {"external": "외장하드 상세", "wearable": "웨어러블 상세"}.get(weekly_kind, "상세")
+        dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
     else:
         label = "삼성"
         dates = pd.to_datetime(payment_dates, errors="coerce").dropna()

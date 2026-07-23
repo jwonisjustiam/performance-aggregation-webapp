@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from processors.samsung_processor import process_samsung
-from processors.weekly_processor import process_weekly
+from processors.weekly_processor import process_detail, process_weekly
 from services.excel_writer import create_result_workbook
 from services.result_formatter import build_download_filename, shorten_model
 from services.validator import validate_saved_workbook
@@ -40,3 +40,11 @@ def test_samsung_workbook_reopens(tmp_path: Path, samsung_frame: pd.DataFrame) -
     path.write_bytes(content)
     assert validation["valid"]
     assert validate_saved_workbook(path, ["통합 실적표", "회차별 합계", "중복 주문 검증"])["valid"]
+
+
+def test_detail_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> None:
+    content, validation = create_result_workbook("detail", process_detail(weekly_frame, "외장하드.xlsx"))
+    path = tmp_path / "detail result.xlsx"
+    path.write_bytes(content)
+    assert validation["valid"]
+    assert validate_saved_workbook(path, ["상세 취합"])["valid"]

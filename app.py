@@ -8,7 +8,7 @@ import tempfile
 import pandas as pd
 import streamlit as st
 
-from processors import process_samsung, process_weekly
+from processors import process_detail, process_samsung, process_weekly
 from processors.weekly_processor import infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_xlsx
 from services.excel_writer import create_result_workbook
@@ -25,6 +25,9 @@ def build_download_filename(
 ) -> str:
     if job_type == "weekly":
         label = {"external": "외장하드", "wearable": "웨어러블"}.get(weekly_kind, "위클리")
+        dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
+    elif job_type == "detail":
+        label = {"external": "외장하드 상세", "wearable": "웨어러블 상세"}.get(weekly_kind, "상세")
         dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
     else:
         label = "삼성"
@@ -113,12 +116,11 @@ def analyze_uploaded_files(
     job_type: str,
     weekly_type: str | None,
     uploaded_files: list[object],
-    broadcast_file: object | None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     with tempfile.TemporaryDirectory() as temporary:
         temp_dir = Path(temporary)
         frame, combined_names, file_info = read_uploaded_workbooks(uploaded_files, temp_dir)
-        return analyze_frame(job_type, weekly_type, frame, combined_names, file_info, temp_dir, broadcast_file)
+        return analyze_frame(job_type, weekly_type, frame, combined_names, file_info)
 
 
 def analyze_frame(
@@ -127,30 +129,18 @@ def analyze_frame(
     frame: pd.DataFrame,
     combined_names: str,
     file_info: list[dict[str, object]],
-    temp_dir: Path,
-    broadcast_file: object | None = None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     payment_dates = pd.to_datetime(frame.get("결제일시"), errors="coerce") if "결제일시" in frame else pd.Series(dtype="datetime64[ns]")
     diagnostics = input_diagnostics(frame, ["주문번호", "결제일시", "상품명", "주문 유입경로"])
     common_orders = None
 
-    if job_type == "weekly":
+    if job_type in {"weekly", "detail"}:
         selected = None if weekly_type in {None, "", "auto"} else weekly_type
         weekly_kind = infer_weekly_kind(combined_names, selected)
-        result = process_weekly(frame, combined_names, selected)
+        result = process_detail(frame, combined_names, selected) if job_type == "detail" else process_weekly(frame, combined_names, selected)
     else:
         weekly_kind = None
-        optional_broadcast = None
-        if broadcast_file is not None:
-            broadcast_name = Path(broadcast_file.name).name
-            if Path(broadcast_name).suffix.lower() != ".xlsx":
-                raise ValueError(XLS_ERROR)
-            broadcast_path = temp_dir / f"broadcast_{broadcast_name}"
-            uploaded_file_to_path(broadcast_file, broadcast_path)
-            optional_broadcast = read_xlsx(broadcast_path).data
-            if "주문번호" in frame and "주문번호" in optional_broadcast:
-                common_orders = len(set(frame["주문번호"].dropna()) & set(optional_broadcast["주문번호"].dropna()))
-        result = process_samsung(frame, optional_broadcast_df=optional_broadcast)
+        result = process_samsung(frame)
 
     filename = build_download_filename(job_type, result, payment_dates, weekly_kind)
     content, validation = create_result_workbook(job_type, result)
@@ -164,10 +154,12 @@ def render_usage_guide() -> None:
         **사용 안내**
 
         1. 왼쪽에서 `업무 유형`을 먼저 선택하세요.
-        2. 위클리 실적은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
-        3. 삼성 실적은 주문 Raw Data 엑셀을 업로드하고, 방송 실적표가 있으면 선택 파일로 추가하세요.
-        4. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
-        5. `분석 시작`을 누르면 결과 미리보기와 `결과 엑셀 다운로드` 버튼이 표시됩니다.
+        2. 업무 유형은 `삼성 취합`, `위클리 취합`, `상세 취합` 3가지입니다.
+        3. 위클리/상세 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
+        4. 상세 취합은 위클리 규칙을 따르며 주문번호, 상품명, 옵션 관리 코드까지 정리합니다.
+        5. 삼성 취합은 주문 Raw Data 엑셀만 업로드하면 됩니다.
+        6. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
+        7. `분석 시작`을 누르면 결과 미리보기와 `결과 엑셀 다운로드` 버튼이 표시됩니다.
         """,
         icon="ℹ️",
     )
@@ -181,18 +173,15 @@ def main() -> None:
 
     with st.sidebar:
         st.header("작업 설정")
-        job_type_label = st.selectbox("업무 유형", ["위클리 실적 취합", "삼성 실적 취합"])
-        job_type = "weekly" if job_type_label.startswith("위클리") else "samsung"
+        job_type_label = st.selectbox("업무 유형", ["삼성 취합", "위클리 취합", "상세 취합"])
+        job_type = {"삼성 취합": "samsung", "위클리 취합": "weekly", "상세 취합": "detail"}[job_type_label]
         weekly_type = None
-        if job_type == "weekly":
+        if job_type in {"weekly", "detail"}:
             weekly_label = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
             weekly_type = {"자동 판정": "auto", "외장하드": "external", "웨어러블": "wearable"}[weekly_label]
 
     st.subheader("엑셀 Raw Data 업로드")
     uploaded_files = st.file_uploader("주문 Raw Data .xlsx 파일", type=["xlsx"], accept_multiple_files=True)
-    broadcast_file = None
-    if job_type == "samsung":
-        broadcast_file = st.file_uploader("방송 실적표 .xlsx 파일(선택)", type=["xlsx"], accept_multiple_files=False)
 
     if st.button("분석 시작", type="primary"):
         try:
@@ -201,7 +190,6 @@ def main() -> None:
                     job_type,
                     weekly_type,
                     uploaded_files,
-                    broadcast_file,
                 )
             show_result(result, content, filename, summary, file_info, diagnostics, validation, common_orders)
         except Exception as exc:

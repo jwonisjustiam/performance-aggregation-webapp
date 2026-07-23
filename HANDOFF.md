@@ -14,10 +14,9 @@
 - `app.py`: Streamlit 화면과 업로드/분석/다운로드 흐름
 - `requirements.txt`: Streamlit Cloud 설치 의존성
 - `.streamlit/config.toml`: Streamlit 기본 설정
-- `.streamlit/secrets.toml.example`: Streamlit Cloud Secrets 입력 예시
 - `processors/`: 위클리/삼성 집계 로직
 - `rules/`: 회차/모델/예외 규칙
-- `services/`: 엑셀 읽기, 저장, 검증, 네이버 API 연동
+- `services/`: 엑셀 읽기, 저장, 검증
 - `DEPLOYMENT.md`: GitHub + Streamlit Cloud 배포 순서
 
 ## 다른 PC에서 프로젝트 열기
@@ -26,8 +25,7 @@
 
 1. 이 폴더를 GitHub 저장소에 올립니다.
 2. 다른 PC에서 GitHub 저장소를 내려받습니다.
-3. `.env` 또는 Streamlit Secrets 실제 값은 별도로 입력합니다.
-4. 실제 주문 엑셀 파일은 GitHub에 올리지 않습니다.
+3. 실제 주문 엑셀 파일은 GitHub에 올리지 않습니다.
 
 ## 로컬 실행
 
@@ -59,6 +57,4 @@ Main file path는 반드시 `app.py`입니다.
 ## 보안 주의사항
 
 - `.env`와 실제 주문 엑셀은 공개 Git 저장소나 공유 ZIP에 포함하지 않습니다.
-- `.streamlit/secrets.toml` 실제 파일은 GitHub에 올리지 않습니다.
-- Streamlit Cloud에는 `App settings > Secrets`에 API 키를 직접 입력합니다.
 - `~/.codex/auth.json`은 로그인 토큰이므로 PC 간 일반 파일 동기화 대상으로 두지 않습니다.

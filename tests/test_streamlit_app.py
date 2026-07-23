@@ -16,8 +16,13 @@ def test_streamlit_entrypoint_and_docs() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "import streamlit as st" in app_source
+    assert "사용 안내" in app_source
+    assert "네이버 API 자동 수집" not in app_source
+    assert "fetch_raw_data" not in app_source
     assert "streamlit==" in requirements
     assert "fastapi" not in requirements.lower()
+    assert "requests==" not in requirements.lower()
+    assert "bcrypt==" not in requirements.lower()
     assert "Streamlit Cloud" in readme
 
 

@@ -1,63 +1,26 @@
 # performance-aggregation-webapp
 
-브라우저에서 `.xlsx` 주문 Raw Data를 1개 이상 업로드해 위클리 또는 삼성 방송 실적을 집계하고, 검증된 결과 엑셀을 다운로드하는 Streamlit 웹앱입니다. 일반 사용자는 배포된 웹주소만 사용하며 Python이나 Excel 설치가 필요하지 않습니다.
+네이버 주문 Raw Data `.xlsx`를 업로드하거나 네이버 커머스 API에서 가져와 위클리/삼성 방송 실적을 집계하는 Streamlit 웹앱입니다.
 
-위클리 작업은 네이버 커머스 API에서 결제일 기준 주문 Raw Data를 직접 가져올 수도 있습니다. 웨어러블과 외장하드는 서로 다른 환경변수와 API 요청으로 처리하며 하나의 요청에서 합치지 않습니다.
+## 주요 기능
 
-## 지원 범위
+- 위클리 실적: 외장하드/웨어러블 회차별 수량·금액 집계
+- 삼성 실적: 쇼핑라이브 SM 모델 집계, 통합 실적표·회차별 합계·중복 주문 검증 생성
+- `.xlsx` 다중 업로드
+- 네이버 커머스 API 계정별 수집
+- 결과 파일 저장 후 재오픈 검증
 
-- Python `>=3.11,<3.13`
-- `.xlsx` 전용 (`.xls`는 변환 후 업로드)
-- Windows와 macOS에서 동일 소스 사용
-- Excel 프로그램, COM, VBA, 운영체제 절대경로 미사용
-- 암호화 파일은 `1234`, `0000` 순서로만 시도
-- 여러 Raw Data 파일을 열 기준으로 통합한 뒤 파일 간 완전 동일 행도 중복 제거
-- 위클리 외장하드 파일과 웨어러블 파일은 한 번에 혼합하지 않고 업무 유형별로 나누어 처리
-- 네이버 API 수집 데이터에는 `API 계정 유형`을 강제로 기록하고 선택 유형과 다르면 처리를 중단
+## 로컬 실행
 
-## 네이버 커머스 API 설정
-
-채팅이나 소스 코드에 인증정보를 입력하지 말고 `.env.example`을 복사해 `.env`를 만든 뒤 재발급한 값을 입력합니다.
-
-```dotenv
-NAVER_WEARABLE_CLIENT_ID=
-NAVER_WEARABLE_CLIENT_SECRET=
-NAVER_EXTERNAL_CLIENT_ID=
-NAVER_EXTERNAL_CLIENT_SECRET=
-```
-
-API 애플리케이션은 주문 조회 권한이 있어야 합니다. 기존 화면의 엑셀 직접 업로드 방식도 계속 사용할 수 있습니다.
-
-## Windows 개발자 실행
+Windows:
 
 ```powershell
-cd performance-aggregation-webapp
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
-python -m streamlit run app.py
-```
-
-또는:
-
-```powershell
+cd "C:\Users\visit\Documents\web app\performance-aggregation-webapp"
 .\scripts\setup_windows.ps1
 .\scripts\run_windows.ps1
 ```
 
-## macOS 개발자 실행
-
-```bash
-cd performance-aggregation-webapp
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
-python -m streamlit run app.py
-```
-
-또는:
+macOS/Linux:
 
 ```bash
 chmod +x scripts/*.sh
@@ -65,39 +28,40 @@ chmod +x scripts/*.sh
 ./scripts/run_macos.sh
 ```
 
-접속 주소는 `http://localhost:8501`입니다.
+실행 후 브라우저에 표시되는 주소로 접속합니다. 보통 아래 주소입니다.
 
-## 테스트와 샘플
+```text
+http://localhost:8501
+```
+
+## Streamlit Cloud 배포
+
+1. 이 폴더를 GitHub 저장소에 올립니다.
+2. Streamlit Community Cloud에서 `Create app`을 누릅니다.
+3. GitHub 저장소를 선택합니다.
+4. Main file path는 `app.py`로 지정합니다.
+5. 배포합니다.
+
+네이버 API 자동 수집을 쓸 경우 Streamlit Cloud의 `App settings > Secrets`에 아래 값을 넣습니다.
+
+```toml
+NAVER_WEARABLE_CLIENT_ID = "발급값"
+NAVER_WEARABLE_CLIENT_SECRET = "발급값"
+NAVER_EXTERNAL_CLIENT_ID = "발급값"
+NAVER_EXTERNAL_CLIENT_SECRET = "발급값"
+```
+
+엑셀 직접 업로드만 사용할 경우 Secrets 설정은 없어도 됩니다.
+
+## GitHub에 올리면 안 되는 파일
+
+- `.env`
+- `.venv/`
+- 실제 업무 엑셀 원본
+- Streamlit Secrets 실제 값
+
+## 테스트
 
 ```bash
-python scripts/generate_samples.py
 python -m pytest
 ```
-
-샘플 파일은 `samples/weekly`, `samples/samsung`에 생성됩니다.
-
-## Docker
-
-```bash
-docker compose up --build
-```
-
-접속 주소: `http://localhost:8501`
-
-## 처리 규칙
-
-- 위클리: 파일명 `외장하드`/`웨어러블` 판정, 고유 주문번호 수량, 상품행별 금액 합산, ±8분 회차, 자정 귀속, 전체 회차 유지
-- 삼성: 쇼핑라이브 + SM 코드만 포함, 주문번호당 대표 모델 1개, 모델별 실적과 회차별 주문/금액, 검증 시트 생성
-- 결과는 저장 후 다시 열어 필수 시트, 빈 시트, Excel 오류값을 검사한 뒤에만 다운로드됩니다.
-
-## 명시적 설정 및 TODO
-
-- 실제 파일에서 열 이름은 별칭으로 탐지하지만, 알려지지 않은 사내 전용 열 이름은 `services/excel_reader.py`의 `ALIASES`에 추가해야 합니다.
-- 삼성 작업 대상일은 유효 결제 데이터에서 가장 많이 나타나는 방송일로 결정합니다. 여러 방송일을 한 파일에서 선택 처리해야 한다면 UI 날짜 선택 옵션을 추가해야 합니다.
-- 선택 방송 실적표의 기존 표시값 보존은 데이터 계약이 제공되지 않아 현재 기본값을 사용합니다. 해당 파일의 실제 열 구조가 확정되면 명시적 매핑을 추가해야 합니다.
-- 암호화 샘플 파일 자체는 저장소에 포함하지 않으며, 암호 처리 순서와 실패 경로를 단위 테스트합니다.
-- `.xls`를 서버에서 자동 변환하지 않습니다.
-
-## 보안
-
-업로드와 복호화 파일은 임시 폴더에서 처리하고 종료 시 삭제합니다. 원본 전체를 로그에 기록하거나 traceback을 화면에 노출하지 않습니다.

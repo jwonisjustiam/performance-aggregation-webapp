@@ -15,7 +15,8 @@ from services.file_security import readable_workbook
 XLS_ERROR = "현재 버전에서는 .xlsx 파일만 지원합니다. .xls 파일은 xlsx로 변환 후 다시 업로드해주세요."
 
 ALIASES = {
-    "주문번호": ("주문번호", "상품주문번호", "order id"),
+    "주문번호": ("주문번호", "order id"),
+    "상품주문번호": ("상품주문번호", "상품 주문번호"),
     "결제일시": ("결제일시", "결제일", "결제 일시"),
     "상품명": ("상품명", "상품 이름"),
     "수량": ("수량", "상품수량"),
@@ -51,7 +52,10 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
             if found is not None:
                 rename[found] = canonical
                 break
-    return df.rename(columns=rename)
+    result = df.rename(columns=rename)
+    if "주문번호" not in result and "상품주문번호" in result:
+        result["주문번호"] = result["상품주문번호"]
+    return result
 
 
 def detect_header_row(path: Path, sheet_name: str, scan_rows: int = 30) -> int:
@@ -91,4 +95,3 @@ def first_present(columns: Iterable[object], candidates: Iterable[str]) -> str |
         if normalize_label(candidate) in lookup:
             return lookup[normalize_label(candidate)]
     return None
-

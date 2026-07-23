@@ -87,7 +87,7 @@ def _raise_for_api_error(response: requests.Response, context: str) -> None:
 
 
 class NaverCommerceClient:
-    """Small synchronous client suitable for a Streamlit request cycle."""
+    """Small synchronous client suitable for one web request cycle."""
 
     def __init__(
         self,

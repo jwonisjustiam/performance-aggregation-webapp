@@ -7,13 +7,23 @@ from datetime import date
 
 import pandas as pd
 
-from rules.samsung_rules import DEFAULT_BROADCAST_VALUES, SAMSUNG_SLOTS
+from rules.samsung_rules import DEFAULT_BROADCAST_VALUES
 from services.amount_resolver import resolve_amount
 from services.result_formatter import shorten_model
-from services.time_slotter import assign_slot, inferred_broadcast_date
+from services.time_slotter import assign_slot, inferred_broadcast_date, slots_for_date
 from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명", "수량", "상품가격", "옵션가격", "주문 유입경로")
+
+
+def _select_model_code(row: pd.Series) -> str:
+    option_code = str(row.get("옵션관리코드", "") or "").strip().upper()
+    seller_code = str(row.get("판매자 상품코드", "") or "").strip().upper()
+    if option_code.startswith("SM"):
+        return option_code
+    if seller_code.startswith("SM"):
+        return seller_code
+    return option_code or seller_code
 
 
 def _target_date(source: pd.DataFrame) -> date:
@@ -36,15 +46,14 @@ def process_samsung(raw_df: pd.DataFrame, optional_broadcast_df: pd.DataFrame | 
     exact_duplicates = source.duplicated(keep="first")
     source = source.loc[~exact_duplicates].copy()
     source["_payment"] = pd.to_datetime(source["결제일시"], errors="coerce")
-    source["_code"] = source.get("옵션관리코드", pd.Series(index=source.index, dtype=object)).fillna("")
-    fallback = source.get("판매자 상품코드", pd.Series(index=source.index, dtype=object)).fillna("")
-    source["_code"] = source["_code"].where(source["_code"].astype(str).str.strip().ne(""), fallback)
+    source["_code"] = source.apply(_select_model_code, axis=1)
     source["_model"] = source["_code"].map(shorten_model)
     source["_live"] = source["주문 유입경로"].astype(str).str.strip().eq("쇼핑라이브")
     amounts = source.apply(resolve_amount, axis=1)
     source["_amount"] = [item[0] for item in amounts]
     target = _target_date(source)
-    assigned = source["_payment"].map(lambda value: assign_slot(value, "wearable", target, SAMSUNG_SLOTS))
+    samsung_slots = slots_for_date("wearable", target)
+    assigned = source["_payment"].map(lambda value: assign_slot(value, "wearable", target, samsung_slots))
     source["_slot"] = [item[1] if item else None for item in assigned]
     source["_date_ok"] = source["_slot"].notna()
     eligible = source["_live"] & source["_model"].str.startswith("SM-") & source["_date_ok"] & source["_amount"].notna()
@@ -86,7 +95,7 @@ def process_samsung(raw_df: pd.DataFrame, optional_broadcast_df: pd.DataFrame | 
     representatives = pd.DataFrame(representative_rows)
     integrated: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
-    for slot in SAMSUNG_SLOTS:
+    for slot in samsung_slots:
         part = representatives[representatives["_slot"] == slot.label] if not representatives.empty else representatives
         counts = part.groupby("_model")["주문번호"].nunique().to_dict() if not part.empty else {}
         models = sorted(counts, key=lambda model: (model != "SM-R390", model)) or [""]

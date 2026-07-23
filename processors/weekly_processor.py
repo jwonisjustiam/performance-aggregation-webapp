@@ -7,7 +7,7 @@ from datetime import date
 import pandas as pd
 
 from services.amount_resolver import resolve_amount, to_millions
-from services.time_slotter import assign_slot, inferred_broadcast_date, slots_for_date
+from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명", "주문 유입경로")
@@ -51,14 +51,28 @@ def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
     resolved = source.apply(resolve_amount, axis=1)
     source["_amount"] = [item[0] for item in resolved]
     source["_amount_basis"] = [item[1] for item in resolved]
+    if "상품주문번호" in source:
+        product_duplicate_mask = source["상품주문번호"].notna() & source["상품주문번호"].astype(str).str.strip().ne("") & source.duplicated(
+            subset=["상품주문번호"], keep="first"
+        )
+    else:
+        duplicate_basis = [column for column in ["주문번호", "결제일시", "상품명", "옵션 정보", "_amount"] if column in source]
+        product_duplicate_mask = source.duplicated(subset=duplicate_basis, keep="first")
+    if product_duplicate_mask.any():
+        duplicates = pd.concat([duplicates, source.loc[product_duplicate_mask].copy()], ignore_index=True)
+        source = source.loc[~product_duplicate_mask].copy()
     source["_broadcast_date"] = source["_payment"].map(inferred_broadcast_date)
     assignments = source.apply(
         lambda row: assign_slot(row["_payment"], kind, row["_broadcast_date"]) if row["_broadcast_date"] else None,
         axis=1,
     )
     source["_slot"] = [item[1] if item else None for item in assignments]
+    source["_disabled_slot"] = source.apply(
+        lambda row: session_is_disabled(kind, row["_broadcast_date"], row["_slot"]) if row["_broadcast_date"] else False,
+        axis=1,
+    )
     invalid_order = source["주문번호"].isna() | source["주문번호"].astype(str).str.strip().eq("")
-    invalid = invalid_order | source["_payment"].isna() | ~source["_live"] | source["_slot"].isna() | source["_amount"].isna()
+    invalid = invalid_order | source["_payment"].isna() | ~source["_live"] | source["_slot"].isna() | source["_disabled_slot"] | source["_amount"].isna()
     excluded = source.loc[invalid].copy()
     included = source.loc[~invalid].copy()
 
@@ -77,16 +91,5 @@ def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
                 }
             )
     final = pd.DataFrame(rows, columns=["날짜", "시간", "수량", "전환율", "금액(백만)"])
-    extra = included[(included["_slot"] == "13:00~14:00") & (kind == "external")].copy()
-    if not extra.empty:
-        extra = extra.assign(
-            **{
-                "반영 금액": extra["_amount"],
-                "금액 기준": extra["_amount_basis"],
-                "해당 회차 합계": extra.groupby(["_broadcast_date", "_slot"])["_amount"].transform("sum"),
-            }
-        )
-        keep = [column for column in ["주문번호", "결제일시", "상품명", "옵션 정보", "반영 금액", "금액 기준", "해당 회차 합계"] if column in extra]
-        extra = extra[keep]
     errors = source.loc[source["_payment"].isna() | source["_amount"].isna()].copy()
-    return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": extra}
+    return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}

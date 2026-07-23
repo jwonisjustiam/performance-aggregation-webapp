@@ -3,6 +3,7 @@ node_modules/
 __pycache__/
 .pytest_cache/
 .env
+.streamlit/secrets.toml
 *.py[cod]
 outputs/*
 !outputs/.gitkeep

@@ -16,6 +16,27 @@ from services.validator import input_diagnostics
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
+JOB_TYPE_OPTIONS = {
+    "삼성 취합": {
+        "code": "samsung",
+        "title": "삼성 취합",
+        "caption": "삼성 쇼핑라이브 Raw Data를 업로드해 통합 실적표, 회차별 합계, 중복 주문 검증 파일을 생성합니다.",
+        "upload_label": "삼성 주문 Raw Data .xlsx 파일",
+    },
+    "위클리 취합": {
+        "code": "weekly",
+        "title": "위클리 취합",
+        "caption": "외장하드 또는 웨어러블 Raw Data를 업로드해 회차별 수량과 금액을 집계합니다.",
+        "upload_label": "위클리 주문 Raw Data .xlsx 파일",
+    },
+    "상세 취합": {
+        "code": "detail",
+        "title": "상세 취합",
+        "caption": "위클리 규칙으로 반영 대상을 걸러낸 뒤 주문번호, 상품명, 옵션 관리 코드를 상세 목록으로 정리합니다.",
+        "upload_label": "상세 취합용 주문 Raw Data .xlsx 파일",
+    },
+}
+
 
 def build_download_filename(
     job_type: str,
@@ -166,22 +187,29 @@ def render_usage_guide() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="삼성 라이브 실적 정리", page_icon="📊", layout="wide")
-    st.title("삼성 라이브 실적 정리")
-    st.caption("주문 Raw Data 엑셀을 업로드해 위클리/삼성 실적 엑셀을 생성합니다.")
-    render_usage_guide()
+    st.set_page_config(page_title="실적 취합 도구", page_icon="📊", layout="wide")
 
     with st.sidebar:
         st.header("작업 설정")
-        job_type_label = st.selectbox("업무 유형", ["삼성 취합", "위클리 취합", "상세 취합"])
-        job_type = {"삼성 취합": "samsung", "위클리 취합": "weekly", "상세 취합": "detail"}[job_type_label]
+        job_type_label = st.selectbox("업무 유형", list(JOB_TYPE_OPTIONS))
+        selected_job = JOB_TYPE_OPTIONS[job_type_label]
+        job_type = selected_job["code"]
         weekly_type = None
         if job_type in {"weekly", "detail"}:
             weekly_label = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
             weekly_type = {"자동 판정": "auto", "외장하드": "external", "웨어러블": "wearable"}[weekly_label]
 
-    st.subheader("엑셀 Raw Data 업로드")
-    uploaded_files = st.file_uploader("주문 Raw Data .xlsx 파일", type=["xlsx"], accept_multiple_files=True)
+    st.title(selected_job["title"])
+    st.caption(selected_job["caption"])
+    render_usage_guide()
+
+    st.subheader(f"{selected_job['title']} Raw Data 업로드")
+    uploaded_files = st.file_uploader(
+        selected_job["upload_label"],
+        type=["xlsx"],
+        accept_multiple_files=True,
+        key=f"raw_files_{job_type}",
+    )
 
     if st.button("분석 시작", type="primary"):
         try:

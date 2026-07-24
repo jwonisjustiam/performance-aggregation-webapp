@@ -17,9 +17,12 @@ def test_streamlit_entrypoint_and_docs() -> None:
 
     assert "import streamlit as st" in app_source
     assert "사용 안내" in app_source
+    assert "JOB_TYPE_OPTIONS" in app_source
     assert "삼성 취합" in app_source
     assert "위클리 취합" in app_source
     assert "상세 취합" in app_source
+    assert "selected_job[\"title\"]" in app_source
+    assert "raw_files_{job_type}" in app_source
     assert "방송 실적표" not in app_source
     assert "네이버 API 자동 수집" not in app_source
     assert "fetch_raw_data" not in app_source

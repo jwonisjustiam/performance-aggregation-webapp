@@ -11,7 +11,7 @@ import streamlit as st
 from processors import process_detail, process_samsung, process_weekly
 from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_xlsx
-from services.excel_writer import create_result_workbook, create_single_sheet_workbook
+from services.excel_writer import create_result_workbook
 from services.validator import input_diagnostics
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -99,6 +99,20 @@ def build_category_download_filename(category_label: str, frame: pd.DataFrame) -
         last = dates.max().strftime("%Y%m%d")
         date_text = first if first == last else f"{first}-{last}"
     return f"워치9 사전판매 {category_label} {date_text} 정리본.xlsx"
+
+
+def create_single_sheet_workbook(sheet_name: str, frame: pd.DataFrame) -> tuple[bytes, dict[str, object]]:
+    """Create one category workbook inside app.py to avoid partial-upload import failures."""
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "result.xlsx"
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            frame.to_excel(writer, sheet_name=sheet_name, index=False)
+        return path.read_bytes(), {
+            "valid": True,
+            "missing_sheets": [],
+            "formula_errors": [],
+            "empty_sheets": [sheet_name] if frame.empty else [],
+        }
 
 
 def frame_summary(frame: pd.DataFrame, source_mode: str) -> dict[str, object]:
@@ -213,7 +227,17 @@ def analyze_frame(
         result = process_samsung(frame, combined_names)
 
     filename = build_download_filename(job_type, result, payment_dates, weekly_kind)
-    content, validation = create_result_workbook(job_type, result)
+    if job_type == "detail":
+        content = b""
+        validation = {
+            "valid": True,
+            "missing_sheets": [],
+            "formula_errors": [],
+            "empty_sheets": [],
+            "note": "워치9 사전판매 결과는 웨어러블/모바일 ACC 별도 다운로드에서 생성합니다.",
+        }
+    else:
+        content, validation = create_result_workbook(job_type, result)
     summary = frame_summary(frame, "엑셀 직접 업로드")
     return result, content, filename, summary, file_info, diagnostics, validation, common_orders
 

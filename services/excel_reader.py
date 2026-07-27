@@ -34,7 +34,7 @@ class WorkbookData:
     data: pd.DataFrame
     sheet_names: list[str]
     selected_sheet: str
-    header_row: int
+    header_row: int | str
     encrypted: bool
 
 
@@ -58,8 +58,8 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def detect_header_row(path: Path, sheet_name: str, scan_rows: int = 30) -> int:
-    """Find the most likely header row using recognized column aliases."""
+def _detect_header_row_with_score(path: Path, sheet_name: str, scan_rows: int = 30) -> tuple[int, int]:
+    """Find the most likely header row and its recognized-column score."""
     preview = pd.read_excel(path, sheet_name=sheet_name, header=None, nrows=scan_rows, engine="openpyxl")
     known = {normalize_label(alias) for aliases in ALIASES.values() for alias in aliases}
     scores = []
@@ -68,8 +68,30 @@ def detect_header_row(path: Path, sheet_name: str, scan_rows: int = 30) -> int:
         scores.append((score, int(index)))
     best_score, best_index = max(scores, default=(0, 0))
     if best_score < 2:
-        return 0
-    return best_index
+        return 0, best_score
+    return best_index, best_score
+
+
+def detect_header_row(path: Path, sheet_name: str, scan_rows: int = 30) -> int:
+    """Find the most likely header row using recognized column aliases."""
+    header_row, _ = _detect_header_row_with_score(path, sheet_name, scan_rows)
+    return header_row
+
+
+def _looks_like_order_sheet(frame: pd.DataFrame) -> bool:
+    """Return True for sheets that look like raw order data."""
+    recognized = {
+        "주문번호",
+        "상품주문번호",
+        "결제일시",
+        "상품명",
+        "수량",
+        "주문 유입경로",
+        "옵션관리코드",
+        "판매자 상품코드",
+    }
+    present = recognized.intersection(set(map(str, frame.columns)))
+    return len(present) >= 3 and not frame.dropna(how="all").empty
 
 
 def read_xlsx(path: Path, sheet_name: str | None = None) -> WorkbookData:
@@ -82,11 +104,31 @@ def read_xlsx(path: Path, sheet_name: str | None = None) -> WorkbookData:
             sheets = list(workbook.sheetnames)
         finally:
             workbook.close()
-        selected = sheet_name if sheet_name in sheets else sheets[0]
-        header_row = detect_header_row(readable, selected)
-        frame = pd.read_excel(readable, sheet_name=selected, header=header_row, engine="openpyxl")
-    frame = frame.dropna(how="all").reset_index(drop=True)
-    return WorkbookData(canonicalize_columns(frame), sheets, selected, header_row + 1, encrypted)
+        target_sheets = [sheet_name] if sheet_name in sheets else sheets
+        frames: list[pd.DataFrame] = []
+        selected_sheets: list[str] = []
+        header_rows: list[str] = []
+        for current_sheet in target_sheets:
+            header_row, header_score = _detect_header_row_with_score(readable, current_sheet)
+            frame = pd.read_excel(readable, sheet_name=current_sheet, header=header_row, engine="openpyxl")
+            frame = canonicalize_columns(frame.dropna(how="all").reset_index(drop=True))
+            if sheet_name in sheets or header_score >= 2 and _looks_like_order_sheet(frame):
+                frame["원본시트"] = current_sheet
+                frames.append(frame)
+                selected_sheets.append(current_sheet)
+                header_rows.append(f"{current_sheet}:{header_row + 1}")
+
+        if frames:
+            combined = pd.concat(frames, ignore_index=True, sort=False)
+            selected = ", ".join(selected_sheets)
+            header_row_text: int | str = ", ".join(header_rows)
+        else:
+            selected = sheets[0]
+            header_row = detect_header_row(readable, selected)
+            combined = pd.read_excel(readable, sheet_name=selected, header=header_row, engine="openpyxl")
+            combined = canonicalize_columns(combined.dropna(how="all").reset_index(drop=True))
+            header_row_text = header_row + 1
+    return WorkbookData(combined, sheets, selected, header_row_text, encrypted)
 
 
 def first_present(columns: Iterable[object], candidates: Iterable[str]) -> str | None:

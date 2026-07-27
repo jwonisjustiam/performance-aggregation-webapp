@@ -35,7 +35,8 @@ def _parse_yyyymmdd(value: str) -> date:
 
 def infer_target_dates(file_name: str) -> list[date] | None:
     """Infer requested broadcast dates from file names such as 20260710~20260712."""
-    ranges = re.findall(r"(\d{8})\s*[~-]\s*(\d{8})", file_name)
+    range_separators = r"[\-~～〜–—－]"
+    ranges = re.findall(rf"(\d{{8}})\s*{range_separators}\s*(\d{{8}})", file_name)
     dates: set[date] = set()
     for start_text, end_text in ranges:
         start = _parse_yyyymmdd(start_text)
@@ -47,7 +48,7 @@ def infer_target_dates(file_name: str) -> list[date] | None:
             dates.add(current)
             current += timedelta(days=1)
 
-    singles = re.findall(r"(?<![~-])\b(\d{8})\b(?!\s*[~-])", file_name)
+    singles = re.findall(rf"(?<!{range_separators})\b(\d{{8}})\b(?!\s*{range_separators})", file_name)
     for value in singles:
         dates.add(_parse_yyyymmdd(value))
 

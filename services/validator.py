@@ -43,7 +43,7 @@ def input_diagnostics(df: pd.DataFrame, required: Iterable[str]) -> dict[str, in
     }
 
 
-def validate_saved_workbook(path: Path, required_sheets: Iterable[str]) -> dict[str, object]:
+def validate_saved_workbook(path: Path, required_sheets: Iterable[str], allow_empty_sheets: bool = False) -> dict[str, object]:
     """Reopen an output workbook and scan for sheet and formula errors."""
     workbook = load_workbook(path, data_only=False)
     try:
@@ -58,7 +58,11 @@ def validate_saved_workbook(path: Path, required_sheets: Iterable[str]) -> dict[
                 for cell in row:
                     if isinstance(cell.value, str) and cell.value in FORMULA_ERRORS:
                         errors.append(f"{sheet.title}!{cell.coordinate}:{cell.value}")
-        return {"valid": not missing and not errors and not empty, "missing_sheets": missing, "formula_errors": errors, "empty_sheets": empty}
+        return {
+            "valid": not missing and not errors and (allow_empty_sheets or not empty),
+            "missing_sheets": missing,
+            "formula_errors": errors,
+            "empty_sheets": empty,
+        }
     finally:
         workbook.close()
-

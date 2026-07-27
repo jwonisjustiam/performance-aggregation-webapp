@@ -12,7 +12,27 @@ from services.time_slotter import assign_slot, inferred_broadcast_date, session_
 from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명", "주문 유입경로")
+DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
 RESULT_KEYS = ("final", "summary", "excluded", "duplicates", "errors", "extra_details")
+WEARABLE_PREFIXES = ("SM-L", "SM-R")
+WEARABLE_KEYWORDS = ("울트라2", "워치9")
+MOBILE_ACC_PREFIXES = ("EP-", "GP-", "FP-", "EF-", "ET-")
+MOBILE_ACC_KEYWORDS = (
+    "스트랩",
+    "케이스",
+    "어댑터",
+    "S26",
+    "맥세이프",
+    "마그넷",
+    "폴더블",
+    "패브릭",
+    "스포츠",
+    "미스티",
+    "픽폼",
+    "트레일",
+    "마린",
+    "플립",
+)
 
 
 def infer_weekly_kind(file_name: str, selected_type: str | None = None) -> str:
@@ -66,6 +86,14 @@ def _selected_option_code(row: pd.Series) -> str:
     option_code = str(row.get("옵션관리코드", "") or "").strip()
     seller_code = str(row.get("판매자 상품코드", "") or "").strip()
     return option_code or seller_code
+
+
+def _matches_by_code_or_name(row: pd.Series, prefixes: tuple[str, ...], keywords: tuple[str, ...]) -> bool:
+    selected_code = _selected_option_code(row).upper()
+    product_name = str(row.get("상품명", "") or "").casefold()
+    if selected_code.startswith(prefixes):
+        return True
+    return any(keyword.casefold() in product_name for keyword in keywords)
 
 
 def _prepare_weekly_source(
@@ -149,23 +177,55 @@ def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
 
 
 def process_detail(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
-    """Create a detail-level output using the same inclusion rules as weekly aggregation."""
-    _, _, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type)
-    detail = included.copy()
-    if detail.empty:
-        final = pd.DataFrame(columns=["날짜", "시간", "주문번호", "상품명", "옵션 관리 코드", "금액"])
-    else:
-        detail["_selected_option_code"] = detail.apply(_selected_option_code, axis=1)
+    """Create Watch9 pre-order detail outputs without live-time or session rules."""
+    missing = missing_columns(raw_df, DETAIL_REQUIRED)
+    if missing:
+        raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
+    source = raw_df.copy()
+    duplicate_mask = source.duplicated(keep="first")
+    duplicates = source.loc[duplicate_mask].copy()
+    source = source.loc[~duplicate_mask].copy()
+    source["_row"] = range(len(source))
+    source["_payment"] = pd.to_datetime(source["결제일시"], errors="coerce")
+    resolved = source.apply(resolve_amount, axis=1)
+    source["_amount"] = [item[0] for item in resolved]
+    source["_amount_basis"] = [item[1] for item in resolved]
+    source["_selected_option_code"] = source.apply(_selected_option_code, axis=1)
+    source["_wearable_match"] = source.apply(lambda row: _matches_by_code_or_name(row, WEARABLE_PREFIXES, WEARABLE_KEYWORDS), axis=1)
+    source["_mobile_acc_match"] = source.apply(lambda row: _matches_by_code_or_name(row, MOBILE_ACC_PREFIXES, MOBILE_ACC_KEYWORDS), axis=1)
+
+    def build_category_frame(category_name: str, mask: pd.Series) -> pd.DataFrame:
+        detail = source.loc[mask].copy()
+        if detail.empty:
+            return pd.DataFrame(columns=["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"])
         final = detail.assign(
-            날짜=detail["_broadcast_date"],
-            시간=detail["_slot"],
+            버전=category_name,
             **{
                 "옵션 관리 코드": detail["_selected_option_code"],
                 "금액": detail["_amount"],
             },
         )
-        final = final[["날짜", "시간", "주문번호", "상품명", "옵션 관리 코드", "금액"]].sort_values(
-            ["날짜", "시간", "주문번호", "상품명"],
+        return final[["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"]].sort_values(
+            ["결제일시", "주문번호", "상품명"],
             kind="stable",
         )
-    return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}
+
+    wearable = build_category_frame("웨어러블", source["_wearable_match"])
+    mobile_acc = build_category_frame("모바일 ACC", source["_mobile_acc_match"])
+    category_frames = [frame for frame in (wearable, mobile_acc) if not frame.empty]
+    if category_frames:
+        final = pd.concat(category_frames, ignore_index=True, sort=False)
+    else:
+        final = pd.DataFrame(columns=["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"])
+    excluded = source.loc[~source["_wearable_match"] & ~source["_mobile_acc_match"]].copy()
+    errors = source.loc[source["_payment"].isna()].copy()
+    return {
+        "final": final,
+        "summary": final.copy(),
+        "excluded": excluded,
+        "duplicates": duplicates,
+        "errors": errors,
+        "extra_details": pd.DataFrame(),
+        "wearable": wearable,
+        "mobile_acc": mobile_acc,
+    }

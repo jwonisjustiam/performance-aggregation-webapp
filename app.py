@@ -29,11 +29,11 @@ JOB_TYPE_OPTIONS = {
         "caption": "외장하드 또는 웨어러블 Raw Data를 업로드해 회차별 수량과 금액을 집계합니다.",
         "upload_label": "위클리 주문 Raw Data .xlsx 파일",
     },
-    "상세 취합": {
+    "워치9 사전판매 판매 실적 취합": {
         "code": "detail",
-        "title": "상세 취합",
-        "caption": "위클리 규칙으로 반영 대상을 걸러낸 뒤 주문번호, 상품명, 옵션 관리 코드를 상세 목록으로 정리합니다.",
-        "upload_label": "상세 취합용 주문 Raw Data .xlsx 파일",
+        "title": "워치9 사전판매 판매 실적 취합",
+        "caption": "Raw Data 전체에서 상품코드와 상품명 기준으로 웨어러블/모바일 ACC 판매 실적 상세 목록을 생성합니다.",
+        "upload_label": "워치9 사전판매 Raw Data .xlsx 파일",
     },
 }
 
@@ -48,8 +48,8 @@ def build_download_filename(
         label = {"external": "외장하드", "wearable": "웨어러블"}.get(weekly_kind, "위클리")
         dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
     elif job_type == "detail":
-        label = {"external": "외장하드 상세", "wearable": "웨어러블 상세"}.get(weekly_kind, "상세")
-        dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
+        label = "워치9 사전판매"
+        dates = pd.to_datetime(result["final"].get("결제일시"), errors="coerce").dropna()
     else:
         label = "삼성"
         dates = pd.to_datetime(payment_dates, errors="coerce").dropna()
@@ -155,10 +155,13 @@ def analyze_frame(
     diagnostics = input_diagnostics(frame, ["주문번호", "결제일시", "상품명", "주문 유입경로"])
     common_orders = None
 
-    if job_type in {"weekly", "detail"}:
+    if job_type == "weekly":
         selected = None if weekly_type in {None, "", "auto"} else weekly_type
         weekly_kind = infer_weekly_kind(combined_names, selected)
-        result = process_detail(frame, combined_names, selected) if job_type == "detail" else process_weekly(frame, combined_names, selected)
+        result = process_weekly(frame, combined_names, selected)
+    elif job_type == "detail":
+        weekly_kind = None
+        result = process_detail(frame, combined_names, None)
     else:
         weekly_kind = None
         result = process_samsung(frame, combined_names)
@@ -175,9 +178,9 @@ def render_usage_guide() -> None:
         **사용 안내**
 
         1. 왼쪽에서 `업무 유형`을 먼저 선택하세요.
-        2. 업무 유형은 `삼성 취합`, `위클리 취합`, `상세 취합` 3가지입니다.
-        3. 위클리/상세 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
-        4. 상세 취합은 위클리 규칙을 따르며 주문번호, 상품명, 옵션 관리 코드까지 정리합니다.
+        2. 업무 유형은 `삼성 취합`, `위클리 취합`, `워치9 사전판매 판매 실적 취합` 3가지입니다.
+        3. 위클리 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
+        4. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 상품코드와 상품명으로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
         5. 삼성 취합은 주문 Raw Data 엑셀만 업로드하면 됩니다.
         6. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
         7. `분석 시작`을 누르면 결과 미리보기와 `결과 엑셀 다운로드` 버튼이 표시됩니다.
@@ -195,7 +198,7 @@ def main() -> None:
         selected_job = JOB_TYPE_OPTIONS[job_type_label]
         job_type = selected_job["code"]
         weekly_type = None
-        if job_type in {"weekly", "detail"}:
+        if job_type == "weekly":
             weekly_label = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
             weekly_type = {"자동 판정": "auto", "외장하드": "external", "웨어러블": "wearable"}[weekly_label]
 

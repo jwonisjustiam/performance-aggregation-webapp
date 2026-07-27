@@ -101,18 +101,19 @@ def test_disabled_wearable_session_orders_are_excluded() -> None:
     assert len(result["excluded"]) == 1
 
 
-def test_detail_uses_weekly_rules_and_falls_back_to_seller_code() -> None:
+def test_detail_watch9_presale_splits_wearable_and_mobile_acc_without_live_time_rules() -> None:
     frame = pd.DataFrame(
         [
-            ["A", "2026-07-07 14:00", "상품A", "", "SELLER-A", 1_000_000, 0, "쇼핑라이브"],
-            ["B", "2026-07-07 14:00", "상품B", "OPT-B", "SELLER-B", 500_000, 0, "쇼핑라이브"],
-            ["C", "2026-07-07 14:00", "상품C", "OPT-C", "SELLER-C", 500_000, 0, "검색"],
+            ["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SELLER-A", 1_000_000, 0, "검색"],
+            ["B", "2026-07-07 15:00", "충전 어댑터", "EP-T000", "SELLER-B", 500_000, 0, "검색"],
+            ["C", "2026-07-07 16:00", "기타 상품", "OPT-C", "SELLER-C", 500_000, 0, "쇼핑라이브"],
         ],
         columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
     )
-    result = process_detail(frame, "외장하드.xlsx", "external")
+    result = process_detail(frame, "주문.xlsx")
     final = result["final"]
-    assert list(final.columns) == ["날짜", "시간", "주문번호", "상품명", "옵션 관리 코드", "금액"]
-    assert set(final["주문번호"]) == {"A", "B"}
+    assert list(final.columns) == ["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"]
+    assert set(result["wearable"]["주문번호"]) == {"A"}
+    assert set(result["mobile_acc"]["주문번호"]) == {"B"}
+    assert set(result["excluded"]["주문번호"]) == {"C"}
     assert final.loc[final["주문번호"] == "A", "옵션 관리 코드"].iloc[0] == "SELLER-A"
-    assert final.loc[final["주문번호"] == "B", "옵션 관리 코드"].iloc[0] == "OPT-B"

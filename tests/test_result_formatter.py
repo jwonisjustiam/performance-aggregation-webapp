@@ -42,9 +42,16 @@ def test_samsung_workbook_reopens(tmp_path: Path, samsung_frame: pd.DataFrame) -
     assert validate_saved_workbook(path, ["통합 실적표", "회차별 합계", "중복 주문 검증"])["valid"]
 
 
-def test_detail_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> None:
-    content, validation = create_result_workbook("detail", process_detail(weekly_frame, "외장하드.xlsx"))
+def test_detail_workbook_reopens(tmp_path: Path) -> None:
+    raw = pd.DataFrame(
+        [
+            ["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SELLER-A", 1_000_000, 0],
+            ["B", "2026-07-07 15:00", "충전 어댑터", "EP-T000", "SELLER-B", 500_000, 0],
+        ],
+        columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격"],
+    )
+    content, validation = create_result_workbook("detail", process_detail(raw, "주문.xlsx"))
     path = tmp_path / "detail result.xlsx"
     path.write_bytes(content)
     assert validation["valid"]
-    assert validate_saved_workbook(path, ["상세 취합"])["valid"]
+    assert validate_saved_workbook(path, ["웨어러블", "모바일 ACC", "전체 미리보기"])["valid"]

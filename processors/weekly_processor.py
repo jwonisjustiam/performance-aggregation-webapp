@@ -14,25 +14,105 @@ from services.validator import missing_columns
 REQUIRED = ("주문번호", "결제일시", "상품명", "주문 유입경로")
 DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
 RESULT_KEYS = ("final", "summary", "excluded", "duplicates", "errors", "extra_details")
-WEARABLE_PREFIXES = ("SM-L", "SM-R")
-WEARABLE_KEYWORDS = ("울트라2", "워치9")
-MOBILE_ACC_PREFIXES = ("EP-", "GP-", "FP-", "EF-", "ET-")
-MOBILE_ACC_KEYWORDS = (
-    "스트랩",
-    "케이스",
-    "어댑터",
-    "S26",
-    "맥세이프",
-    "마그넷",
-    "폴더블",
-    "패브릭",
-    "스포츠",
-    "미스티",
-    "픽폼",
-    "트레일",
-    "마린",
-    "플립",
-)
+WEARABLE_SKUS = {
+    "SM-L340NZEAKOO",
+    "SM-L340NZKAKOO",
+    "SM-L345NZEAKOO",
+    "SM-L345NZKAKOO",
+    "SM-L350NZKAKOO",
+    "SM-L350NZSAKOO",
+    "SM-L355NZKAKOO",
+    "SM-L715NZSAKOO",
+    "SM-L715NZKAKOO",
+}
+MOBILE_ACC_SKUS = {
+    "EF-CF976CTEGKR",
+    "EF-EF976CBEGKR",
+    "EF-EF976CGEGKR",
+    "EF-EF976CYEGKR",
+    "EF-EF976CWEGKR",
+    "EF-KF976SBEGKR",
+    "EF-KF976SNEGKR",
+    "EF-KF976SREGKR",
+    "EF-XF976SBEGKR",
+    "EF-QF976CTEGKR",
+    "EF-UF976CTEGKR",
+    "EF-CF971CTEGKR",
+    "EF-EF971CBEGKR",
+    "EF-EF971CGEGKR",
+    "EF-EF971CVEGKR",
+    "EF-EF971CWEGKR",
+    "EF-KF971SBEGKR",
+    "EF-KF971SNEGKR",
+    "EF-KF971SREGKR",
+    "EF-XF971SBEGKR",
+    "EF-QF971CTEGKR",
+    "EF-UF971CTEGKR",
+    "EF-CF776CTEGKR",
+    "EF-EF776CBEGKR",
+    "EF-EF776CGEGKR",
+    "EF-EF776CVEGKR",
+    "EF-EF776CWEGKR",
+    "EF-FF776CBEGKR",
+    "EF-FF776CSEGKR",
+    "EF-QF776CTEGKR",
+    "EF-UF776CTEGKR",
+    "GP-TOU026PGGBK",
+    "GP-TOU026KDBBK",
+    "ET-SLL50LBEGKR",
+    "ET-SLL50LAEGKR",
+    "ET-SLL50LNEGKR",
+    "ET-SLL50LUEGKR",
+    "ET-SLL50LWEGKR",
+    "ET-SNL34SBEGKR",
+    "ET-SNL34SGEGKR",
+    "ET-SNL34SLEGKR",
+    "ET-SNL34SUEGKR",
+    "ET-SNL34SYEGKR",
+    "ET-SNL35LBEGKR",
+    "ET-SNL35LGEGKR",
+    "ET-SNL35LLEGKR",
+    "ET-SNL35LUEGKR",
+    "ET-SNL35LYEGKR",
+    "ET-SVL32SDEGKR",
+    "ET-SVL32SGEGKR",
+    "ET-SVL32SKEGKR",
+    "ET-SVL32SLEGKR",
+    "ET-SVL32SYEGKR",
+    "ET-SVL33LDEGKR",
+    "ET-SVL33LGEGKR",
+    "ET-SVL33LKEGKR",
+    "ET-SVL33LLEGKR",
+    "ET-SVL33LYEGKR",
+    "ET-SXL34SBEGKR",
+    "ET-SXL34SLEGKR",
+    "ET-SXL34SMEGKR",
+    "ET-SXL34SUEGKR",
+    "ET-SXL34SYEGKR",
+    "ET-SXL35LBEGKR",
+    "ET-SXL35LLEGKR",
+    "ET-SXL35LMEGKR",
+    "ET-SXL35LUEGKR",
+    "ET-SXL35LYEGKR",
+    "GP-FPL345KDBTK",
+    "GP-FPL355KDBTK",
+    "ET-SBL71MAEGKR",
+    "ET-SBL71MBEGKR",
+    "ET-SBL71MGEGKR",
+    "ET-SBL71MJEGKR",
+    "ET-SBL71MSEGKR",
+    "ET-SNL71MBEGKR",
+    "ET-SNL71MDEGKR",
+    "ET-SNL71MGEGKR",
+    "ET-SNL71MLEGKR",
+    "ET-SNL71MOEGKR",
+    "ET-SVL70MFEGKR",
+    "ET-SVL70MGEGKR",
+    "ET-SVL70MJEGKR",
+    "ET-SVL70MKEGKR",
+    "ET-SVL70MLEGKR",
+    "GP-FPL716KDBTK",
+}
 
 
 def infer_weekly_kind(file_name: str, selected_type: str | None = None) -> str:
@@ -88,12 +168,8 @@ def _selected_option_code(row: pd.Series) -> str:
     return option_code or seller_code
 
 
-def _matches_by_code_or_name(row: pd.Series, prefixes: tuple[str, ...], keywords: tuple[str, ...]) -> bool:
-    selected_code = _selected_option_code(row).upper()
-    product_name = str(row.get("상품명", "") or "").casefold()
-    if selected_code.startswith(prefixes):
-        return True
-    return any(keyword.casefold() in product_name for keyword in keywords)
+def _normalize_sku(value: object) -> str:
+    return re.sub(r"\s+", "", str(value or "")).upper()
 
 
 def _prepare_weekly_source(
@@ -191,8 +267,9 @@ def process_detail(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
     source["_amount"] = [item[0] for item in resolved]
     source["_amount_basis"] = [item[1] for item in resolved]
     source["_selected_option_code"] = source.apply(_selected_option_code, axis=1)
-    source["_wearable_match"] = source.apply(lambda row: _matches_by_code_or_name(row, WEARABLE_PREFIXES, WEARABLE_KEYWORDS), axis=1)
-    source["_mobile_acc_match"] = source.apply(lambda row: _matches_by_code_or_name(row, MOBILE_ACC_PREFIXES, MOBILE_ACC_KEYWORDS), axis=1)
+    source["_sku"] = source["_selected_option_code"].map(_normalize_sku)
+    source["_wearable_match"] = source["_sku"].isin(WEARABLE_SKUS)
+    source["_mobile_acc_match"] = source["_sku"].isin(MOBILE_ACC_SKUS)
 
     def build_category_frame(category_name: str, mask: pd.Series) -> pd.DataFrame:
         detail = source.loc[mask].copy()

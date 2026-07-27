@@ -45,8 +45,8 @@ def test_samsung_workbook_reopens(tmp_path: Path, samsung_frame: pd.DataFrame) -
 def test_detail_workbook_reopens(tmp_path: Path) -> None:
     raw = pd.DataFrame(
         [
-            ["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SELLER-A", 1_000_000, 0],
-            ["B", "2026-07-07 15:00", "충전 어댑터", "EP-T000", "SELLER-B", 500_000, 0],
+            ["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SM-L340NZEAKOO", 1_000_000, 0],
+            ["B", "2026-07-07 15:00", "충전 어댑터", "EF-QF976CTEGKR", "SELLER-B", 500_000, 0],
         ],
         columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격"],
     )

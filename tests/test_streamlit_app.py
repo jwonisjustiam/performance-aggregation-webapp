@@ -55,7 +55,7 @@ def test_weekly_sample_can_create_downloadable_workbook() -> None:
 
 def test_detail_workbook_sheet_is_created() -> None:
     raw = pd.DataFrame(
-        [["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SELLER-A", 1_000_000, 0, "검색"]],
+        [["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SM-L340NZEAKOO", 1_000_000, 0, "검색"]],
         columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
     )
     from processors.weekly_processor import process_detail

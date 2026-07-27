@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from processors.weekly_processor import infer_weekly_kind, process_detail, process_weekly
+from processors.weekly_processor import infer_target_dates, infer_weekly_kind, process_detail, process_weekly
 
 
 def test_unique_order_count_and_multiple_line_amount(weekly_frame: pd.DataFrame) -> None:
@@ -42,6 +42,40 @@ def test_multiple_raw_files_are_combined_and_deduplicated(weekly_frame: pd.DataF
 def test_mixed_weekly_file_types_are_rejected() -> None:
     with pytest.raises(ValueError, match="혼합"):
         infer_weekly_kind("외장하드.xlsx | 웨어러블.xlsx")
+
+
+def test_period_file_name_infers_all_target_broadcast_dates() -> None:
+    assert infer_target_dates("웨어러블 20260724~20260726 금~일 데이터 1.xlsx") == [
+        pd.Timestamp("2026-07-24").date(),
+        pd.Timestamp("2026-07-25").date(),
+        pd.Timestamp("2026-07-26").date(),
+    ]
+
+
+def test_period_file_outputs_all_target_dates_and_excludes_after_last_midnight_window() -> None:
+    frame = pd.DataFrame(
+        [
+            ["A", "2026-07-24 01:20", "상품A", 100_000, 0, "쇼핑라이브"],
+            ["B", "2026-07-25 01:20", "상품B", 100_000, 0, "쇼핑라이브"],
+            ["C", "2026-07-26 01:20", "상품C", 100_000, 0, "쇼핑라이브"],
+            ["D", "2026-07-27 00:30", "상품D", 100_000, 0, "쇼핑라이브"],
+            ["E", "2026-07-27 01:09", "상품E", 100_000, 0, "쇼핑라이브"],
+        ],
+        columns=["주문번호", "결제일시", "상품명", "상품가격", "옵션가격", "주문 유입경로"],
+    )
+    result = process_weekly(frame, "웨어러블 20260724~20260726 금~일 데이터 1.xlsx", "wearable")
+    final = result["final"]
+    assert set(final["날짜"]) == {
+        pd.Timestamp("2026-07-24").date(),
+        pd.Timestamp("2026-07-25").date(),
+        pd.Timestamp("2026-07-26").date(),
+    }
+    assert final.groupby("날짜")["수량"].sum().to_dict() == {
+        pd.Timestamp("2026-07-24").date(): 1,
+        pd.Timestamp("2026-07-25").date(): 1,
+        pd.Timestamp("2026-07-26").date(): 2,
+    }
+    assert set(result["excluded"]["주문번호"]) == {"E"}
 
 
 def test_product_order_number_duplicate_removed() -> None:

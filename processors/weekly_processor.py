@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+import re
 
 import pandas as pd
 
@@ -28,6 +29,31 @@ def infer_weekly_kind(file_name: str, selected_type: str | None = None) -> str:
     raise ValueError("파일명에서 유형을 확인할 수 없습니다. 외장하드 또는 웨어러블 유형을 선택해주세요.")
 
 
+def _parse_yyyymmdd(value: str) -> date:
+    return date(int(value[:4]), int(value[4:6]), int(value[6:8]))
+
+
+def infer_target_dates(file_name: str) -> list[date] | None:
+    """Infer requested broadcast dates from file names such as 20260710~20260712."""
+    ranges = re.findall(r"(\d{8})\s*[~-]\s*(\d{8})", file_name)
+    dates: set[date] = set()
+    for start_text, end_text in ranges:
+        start = _parse_yyyymmdd(start_text)
+        end = _parse_yyyymmdd(end_text)
+        if end < start:
+            start, end = end, start
+        current = start
+        while current <= end:
+            dates.add(current)
+            current += timedelta(days=1)
+
+    singles = re.findall(r"(?<![~-])\b(\d{8})\b(?!\s*[~-])", file_name)
+    for value in singles:
+        dates.add(_parse_yyyymmdd(value))
+
+    return sorted(dates) or None
+
+
 def _is_live(row: pd.Series) -> bool:
     if str(row.get("주문 유입경로", "")).strip() == "쇼핑라이브":
         return True
@@ -51,6 +77,7 @@ def _prepare_weekly_source(
     if missing:
         raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
     kind = infer_weekly_kind(file_name, selected_type)
+    target_dates = infer_target_dates(file_name)
     source = raw_df.copy()
     duplicate_mask = source.duplicated(keep="first")
     duplicates = source.loc[duplicate_mask].copy()
@@ -81,18 +108,28 @@ def _prepare_weekly_source(
         lambda row: session_is_disabled(kind, row["_broadcast_date"], row["_slot"]) if row["_broadcast_date"] else False,
         axis=1,
     )
+    source["_target_date_ok"] = True if target_dates is None else source["_broadcast_date"].isin(target_dates)
     invalid_order = source["주문번호"].isna() | source["주문번호"].astype(str).str.strip().eq("")
-    invalid = invalid_order | source["_payment"].isna() | ~source["_live"] | source["_slot"].isna() | source["_disabled_slot"] | source["_amount"].isna()
+    invalid = (
+        invalid_order
+        | source["_payment"].isna()
+        | ~source["_live"]
+        | source["_slot"].isna()
+        | source["_disabled_slot"]
+        | ~source["_target_date_ok"]
+        | source["_amount"].isna()
+    )
     excluded = source.loc[invalid].copy()
     included = source.loc[~invalid].copy()
     errors = source.loc[source["_payment"].isna() | source["_amount"].isna()].copy()
+    source.attrs["target_dates"] = target_dates
     return kind, source, included, excluded, duplicates, errors
 
 
 def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
     """Aggregate a weekly raw-order dataframe by broadcast date and slot."""
     kind, source, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type)
-    dates = sorted(date_value for date_value in source["_broadcast_date"].dropna().unique())
+    dates = source.attrs.get("target_dates") or sorted(date_value for date_value in source["_broadcast_date"].dropna().unique())
     rows: list[dict[str, object]] = []
     for broadcast_date in dates:
         for slot in slots_for_date(kind, broadcast_date):

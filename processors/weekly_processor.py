@@ -252,7 +252,13 @@ def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
     return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}
 
 
-def process_detail(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
+def process_detail(
+    raw_df: pd.DataFrame,
+    file_name: str,
+    selected_type: str | None = None,
+    wearable_skus: set[str] | None = None,
+    mobile_acc_skus: set[str] | None = None,
+) -> dict[str, pd.DataFrame]:
     """Create Watch9 pre-order detail outputs without live-time or session rules."""
     missing = missing_columns(raw_df, DETAIL_REQUIRED)
     if missing:
@@ -268,8 +274,10 @@ def process_detail(raw_df: pd.DataFrame, file_name: str, selected_type: str | No
     source["_amount_basis"] = [item[1] for item in resolved]
     source["_selected_option_code"] = source.apply(_selected_option_code, axis=1)
     source["_sku"] = source["_selected_option_code"].map(_normalize_sku)
-    source["_wearable_match"] = source["_sku"].isin(WEARABLE_SKUS)
-    source["_mobile_acc_match"] = source["_sku"].isin(MOBILE_ACC_SKUS)
+    active_wearable_skus = {_normalize_sku(value) for value in (wearable_skus or WEARABLE_SKUS) if _normalize_sku(value)}
+    active_mobile_acc_skus = {_normalize_sku(value) for value in (mobile_acc_skus or MOBILE_ACC_SKUS) if _normalize_sku(value)}
+    source["_wearable_match"] = source["_sku"].isin(active_wearable_skus)
+    source["_mobile_acc_match"] = source["_sku"].isin(active_mobile_acc_skus)
 
     def build_category_frame(category_name: str, mask: pd.Series) -> pd.DataFrame:
         detail = source.loc[mask].copy()

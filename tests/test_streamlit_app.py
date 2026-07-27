@@ -26,7 +26,7 @@ def test_streamlit_entrypoint_and_docs() -> None:
     assert "방송 실적표" not in app_source
     assert "네이버 API 자동 수집" not in app_source
     assert "fetch_raw_data" not in app_source
-    assert "streamlit==" in requirements
+    assert any(line.strip().startswith("streamlit") for line in requirements.splitlines())
     assert "fastapi" not in requirements.lower()
     assert "requests==" not in requirements.lower()
     assert "bcrypt==" not in requirements.lower()
@@ -44,6 +44,7 @@ def test_weekly_sample_can_create_downloadable_workbook() -> None:
     assert validation["valid"] is True
 
     path = ROOT / "outputs" / "_test_streamlit_weekly.xlsx"
+    path.parent.mkdir(exist_ok=True)
     path.write_bytes(content)
     workbook = load_workbook(path, read_only=True)
     try:
@@ -66,6 +67,7 @@ def test_detail_workbook_sheet_is_created() -> None:
     assert validation["valid"] is True
 
     path = ROOT / "outputs" / "_test_streamlit_detail.xlsx"
+    path.parent.mkdir(exist_ok=True)
     path.write_bytes(content)
     workbook = load_workbook(path, read_only=True)
     try:

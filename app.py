@@ -9,9 +9,9 @@ import pandas as pd
 import streamlit as st
 
 from processors import process_detail, process_samsung, process_weekly
-from processors.weekly_processor import infer_weekly_kind
+from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_xlsx
-from services.excel_writer import create_result_workbook
+from services.excel_writer import create_result_workbook, create_single_sheet_workbook
 from services.validator import input_diagnostics
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -36,6 +36,19 @@ JOB_TYPE_OPTIONS = {
         "upload_label": "워치9 사전판매 Raw Data .xlsx 파일",
     },
 }
+
+
+def format_rule_values(values: set[str]) -> str:
+    return "\n".join(sorted(values))
+
+
+def parse_rule_values(text: str) -> set[str]:
+    values = []
+    for chunk in str(text or "").replace(",", "\n").splitlines():
+        cleaned = chunk.strip().upper()
+        if cleaned:
+            values.append(cleaned)
+    return set(values)
 
 
 def safe_datetime_series(value: object) -> pd.Series:
@@ -75,6 +88,17 @@ def build_download_filename(
         last = dates.max().strftime("%Y%m%d")
         date_text = first if first == last else f"{first}-{last}"
     return f"{label} {date_text} 정리본.xlsx"
+
+
+def build_category_download_filename(category_label: str, frame: pd.DataFrame) -> str:
+    dates = safe_datetime_series(frame.get("결제일시") if "결제일시" in frame else None).dropna()
+    if dates.empty:
+        date_text = "날짜미확인"
+    else:
+        first = dates.min().strftime("%Y%m%d")
+        last = dates.max().strftime("%Y%m%d")
+        date_text = first if first == last else f"{first}-{last}"
+    return f"워치9 사전판매 {category_label} {date_text} 정리본.xlsx"
 
 
 def frame_summary(frame: pd.DataFrame, source_mode: str) -> dict[str, object]:
@@ -151,11 +175,12 @@ def analyze_uploaded_files(
     job_type: str,
     weekly_type: str | None,
     uploaded_files: list[object],
+    detail_rules: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     with tempfile.TemporaryDirectory() as temporary:
         temp_dir = Path(temporary)
         frame, combined_names, file_info = read_uploaded_workbooks(uploaded_files, temp_dir)
-        return analyze_frame(job_type, weekly_type, frame, combined_names, file_info)
+        return analyze_frame(job_type, weekly_type, frame, combined_names, file_info, detail_rules)
 
 
 def analyze_frame(
@@ -164,6 +189,7 @@ def analyze_frame(
     frame: pd.DataFrame,
     combined_names: str,
     file_info: list[dict[str, object]],
+    detail_rules: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     payment_dates = pd.to_datetime(frame.get("결제일시"), errors="coerce") if "결제일시" in frame else pd.Series(dtype="datetime64[ns]")
     diagnostics = input_diagnostics(frame, ["주문번호", "결제일시", "상품명", "주문 유입경로"])
@@ -175,7 +201,13 @@ def analyze_frame(
         result = process_weekly(frame, combined_names, selected)
     elif job_type == "detail":
         weekly_kind = None
-        result = process_detail(frame, combined_names, None)
+        result = process_detail(
+            frame,
+            combined_names,
+            None,
+            wearable_skus=None if detail_rules is None else detail_rules.get("wearable_skus"),
+            mobile_acc_skus=None if detail_rules is None else detail_rules.get("mobile_acc_skus"),
+        )
     else:
         weekly_kind = None
         result = process_samsung(frame, combined_names)
@@ -187,20 +219,18 @@ def analyze_frame(
 
 
 def render_usage_guide() -> None:
-    st.info(
-        """
-        **사용 안내**
-
-        1. 왼쪽에서 `업무 유형`을 먼저 선택하세요.
-        2. 업무 유형은 `삼성 취합`, `위클리 취합`, `워치9 사전판매 판매 실적 취합` 3가지입니다.
-        3. 위클리 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
-        4. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 옵션 관리 코드 또는 판매자 상품 코드의 지정 SKU 목록으로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
-        5. 삼성 취합은 주문 Raw Data 엑셀만 업로드하면 됩니다.
-        6. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
-        7. `분석 시작`을 누르면 결과 미리보기와 `결과 엑셀 다운로드` 버튼이 표시됩니다.
-        """,
-        icon="ℹ️",
-    )
+    with st.expander("사용 안내", expanded=False):
+        st.markdown(
+            """
+            1. 왼쪽에서 `업무 유형`을 먼저 선택하세요.
+            2. 업무 유형은 `삼성 취합`, `위클리 취합`, `워치9 사전판매 판매 실적 취합` 3가지입니다.
+            3. 위클리 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
+            4. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 옵션 관리 코드 또는 판매자 상품 코드의 SKU 목록으로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
+            5. 워치9 사전판매 판매 실적 취합에서는 화면의 SKU 목록을 직접 수정한 뒤 분석할 수 있습니다.
+            6. 삼성 취합은 주문 Raw Data 엑셀만 업로드하면 됩니다.
+            7. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
+            """
+        )
 
 
 def main() -> None:
@@ -212,9 +242,27 @@ def main() -> None:
         selected_job = JOB_TYPE_OPTIONS[job_type_label]
         job_type = selected_job["code"]
         weekly_type = None
+        detail_rules = None
         if job_type == "weekly":
             weekly_label = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
             weekly_type = {"자동 판정": "auto", "외장하드": "external", "웨어러블": "wearable"}[weekly_label]
+        elif job_type == "detail":
+            st.subheader("워치9 분류 규칙")
+            st.caption("쉼표 또는 줄바꿈으로 구분해서 수정할 수 있습니다. 비워두면 해당 버전 결과가 0건으로 나옵니다.")
+            wearable_rule_text = st.text_area(
+                "웨어러블 SKU 목록",
+                value=format_rule_values(WEARABLE_SKUS),
+                height=160,
+            )
+            mobile_acc_rule_text = st.text_area(
+                "모바일 ACC SKU 목록",
+                value=format_rule_values(MOBILE_ACC_SKUS),
+                height=220,
+            )
+            detail_rules = {
+                "wearable_skus": parse_rule_values(wearable_rule_text),
+                "mobile_acc_skus": parse_rule_values(mobile_acc_rule_text),
+            }
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
@@ -235,13 +283,15 @@ def main() -> None:
                     job_type,
                     weekly_type,
                     uploaded_files,
+                    detail_rules,
                 )
-            show_result(result, content, filename, summary, file_info, diagnostics, validation, common_orders)
+            show_result(job_type, result, content, filename, summary, file_info, diagnostics, validation, common_orders)
         except Exception as exc:
             st.error(f"처리할 수 없습니다: {exc}")
 
 
 def show_result(
+    job_type: str,
     result: dict[str, pd.DataFrame],
     content: bytes,
     filename: str,
@@ -253,13 +303,38 @@ def show_result(
 ) -> None:
     st.success("분석과 저장 후 재검증을 완료했습니다.")
     render_summary_cards(summary, result)
-    st.download_button(
-        "결과 엑셀 다운로드",
-        data=content,
-        file_name=filename,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-    )
+    if job_type == "detail":
+        download_columns = st.columns(2)
+        wearable_content, wearable_validation = create_single_sheet_workbook("웨어러블", result.get("wearable", pd.DataFrame()))
+        mobile_acc_content, mobile_acc_validation = create_single_sheet_workbook("모바일 ACC", result.get("mobile_acc", pd.DataFrame()))
+        download_columns[0].download_button(
+            "웨어러블 결과 엑셀 다운로드",
+            data=wearable_content,
+            file_name=build_category_download_filename("웨어러블", result.get("wearable", pd.DataFrame())),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+        )
+        download_columns[1].download_button(
+            "모바일 ACC 결과 엑셀 다운로드",
+            data=mobile_acc_content,
+            file_name=build_category_download_filename("모바일 ACC", result.get("mobile_acc", pd.DataFrame())),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        validation = {
+            **validation,
+            "분리파일검증": {
+                "웨어러블": wearable_validation,
+                "모바일_ACC": mobile_acc_validation,
+            },
+        }
+    else:
+        st.download_button(
+            "결과 엑셀 다운로드",
+            data=content,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+        )
     st.subheader("최종 결과 미리보기")
     if result["final"].empty:
         st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")

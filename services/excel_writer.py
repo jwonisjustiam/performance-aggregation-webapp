@@ -72,3 +72,16 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
         if not validation["valid"]:
             raise ValueError(f"결과 파일 검증 실패: {validation}")
         return path.read_bytes(), validation
+
+
+def create_single_sheet_workbook(sheet_name: str, frame: pd.DataFrame, allow_empty: bool = True) -> tuple[bytes, dict[str, object]]:
+    """Create one downloadable workbook for one result category."""
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "result.xlsx"
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            frame.to_excel(writer, sheet_name=sheet_name, index=False)
+        _style(path, {sheet_name: {"금액": "#,##0"}})
+        validation = validate_saved_workbook(path, [sheet_name], allow_empty_sheets=allow_empty)
+        if not validation["valid"]:
+            raise ValueError(f"결과 파일 검증 실패: {validation}")
+        return path.read_bytes(), validation

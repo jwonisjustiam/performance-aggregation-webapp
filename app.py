@@ -38,6 +38,20 @@ JOB_TYPE_OPTIONS = {
 }
 
 
+def safe_datetime_series(value: object) -> pd.Series:
+    """Convert optional date-like input to a Series that always supports dropna()."""
+    if value is None:
+        return pd.Series(dtype="datetime64[ns]")
+    converted = pd.to_datetime(value, errors="coerce")
+    if isinstance(converted, pd.Series):
+        return converted
+    if isinstance(converted, pd.DatetimeIndex):
+        return pd.Series(converted)
+    if pd.isna(converted):
+        return pd.Series(dtype="datetime64[ns]")
+    return pd.Series([converted])
+
+
 def build_download_filename(
     job_type: str,
     result: dict[str, pd.DataFrame],
@@ -46,13 +60,13 @@ def build_download_filename(
 ) -> str:
     if job_type == "weekly":
         label = {"external": "외장하드", "wearable": "웨어러블"}.get(weekly_kind, "위클리")
-        dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
+        dates = safe_datetime_series(result["final"].get("날짜")).dropna()
     elif job_type == "detail":
         label = "워치9 사전판매"
-        dates = pd.to_datetime(result["final"].get("결제일시"), errors="coerce").dropna()
+        dates = safe_datetime_series(result["final"].get("결제일시")).dropna()
     else:
         label = "삼성"
-        dates = pd.to_datetime(payment_dates, errors="coerce").dropna()
+        dates = safe_datetime_series(payment_dates).dropna()
 
     if dates.empty:
         date_text = "날짜미확인"
@@ -247,6 +261,8 @@ def show_result(
         type="primary",
     )
     st.subheader("최종 결과 미리보기")
+    if result["final"].empty:
+        st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 상품명, 옵션 관리 코드, 판매자 상품 코드를 확인해주세요.")
     st.dataframe(result["final"], use_container_width=True)
     if file_info:
         with st.expander("입력 파일 정보", expanded=False):

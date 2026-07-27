@@ -21,6 +21,19 @@ def sort_models(df: pd.DataFrame, model_column: str = "모델") -> pd.DataFrame:
     return result.sort_values("_priority", kind="stable").drop(columns="_priority").reset_index(drop=True)
 
 
+def safe_datetime_series(value: object) -> pd.Series:
+    if value is None:
+        return pd.Series(dtype="datetime64[ns]")
+    converted = pd.to_datetime(value, errors="coerce")
+    if isinstance(converted, pd.Series):
+        return converted
+    if isinstance(converted, pd.DatetimeIndex):
+        return pd.Series(converted)
+    if pd.isna(converted):
+        return pd.Series(dtype="datetime64[ns]")
+    return pd.Series([converted])
+
+
 def build_download_filename(
     job_type: str,
     result: dict[str, pd.DataFrame],
@@ -30,13 +43,13 @@ def build_download_filename(
     """Build a readable result filename from the actual type and result dates."""
     if job_type == "weekly":
         label = {"external": "외장하드", "wearable": "웨어러블"}.get(weekly_kind, "위클리")
-        dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
+        dates = safe_datetime_series(result["final"].get("날짜")).dropna()
     elif job_type == "detail":
-        label = {"external": "외장하드 상세", "wearable": "웨어러블 상세"}.get(weekly_kind, "상세")
-        dates = pd.to_datetime(result["final"].get("날짜"), errors="coerce").dropna()
+        label = "워치9 사전판매"
+        dates = safe_datetime_series(result["final"].get("결제일시")).dropna()
     else:
         label = "삼성"
-        dates = pd.to_datetime(payment_dates, errors="coerce").dropna()
+        dates = safe_datetime_series(payment_dates).dropna()
 
     if dates.empty:
         date_text = "날짜미확인"

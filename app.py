@@ -161,7 +161,7 @@ def analyze_frame(
         result = process_detail(frame, combined_names, selected) if job_type == "detail" else process_weekly(frame, combined_names, selected)
     else:
         weekly_kind = None
-        result = process_samsung(frame)
+        result = process_samsung(frame, combined_names)
 
     filename = build_download_filename(job_type, result, payment_dates, weekly_kind)
     content, validation = create_result_workbook(job_type, result)

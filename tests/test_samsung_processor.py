@@ -42,3 +42,22 @@ def test_samsung_uses_wearable_date_override_slots() -> None:
     result = process_samsung(frame)
     assert "11:40" not in set(result["final"]["시간"])
     assert {"13:00", "20:00", "20:20"}.issubset(set(result["final"]["시간"]))
+
+
+def test_samsung_period_file_outputs_all_target_dates_and_excludes_after_last_midnight_window() -> None:
+    frame = pd.DataFrame(
+        [
+            ["S1", "2026-07-24 01:20", "워치", 1, "SM-R390NZSAKOO", "", 200_000, 0, "쇼핑라이브"],
+            ["S2", "2026-07-25 01:20", "워치", 1, "SM-L320NDAAKOO", "", 200_000, 0, "쇼핑라이브"],
+            ["S3", "2026-07-26 01:20", "워치", 1, "SM-L705NAW1KOO", "", 200_000, 0, "쇼핑라이브"],
+            ["S4", "2026-07-27 00:30", "워치", 1, "SM-R390NZSAKOO", "", 200_000, 0, "쇼핑라이브"],
+            ["S5", "2026-07-27 01:09", "워치", 1, "SM-R390NZSAKOO", "", 200_000, 0, "쇼핑라이브"],
+        ],
+        columns=["주문번호", "결제일시", "상품명", "수량", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
+    )
+    result = process_samsung(frame, "웨어러블 20260724~20260726 금~일 데이터 1.xlsx")
+    summary = result["summary"]
+    assert set(zip(summary["월"], summary["일"])) == {(7, 24), (7, 25), (7, 26)}
+    assert sum(value for value in summary["총 주문수"] if value != "") == 4
+    excluded = result["duplicates"].query("주문번호 == 'S5'").iloc[0]
+    assert "회차 범위 밖" in excluded["처리 기준"]

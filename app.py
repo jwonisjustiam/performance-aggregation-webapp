@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 import tempfile
 from inspect import signature
+import hashlib
 
 import pandas as pd
 import streamlit as st
@@ -99,6 +100,11 @@ def infer_uploaded_dates(uploaded_files: list[object]) -> list[date]:
     return infer_target_dates(combined_names) or []
 
 
+def uploaded_files_key(uploaded_files: list[object]) -> str:
+    names = "|".join(Path(getattr(item, "name", "") or "").name for item in uploaded_files)
+    return hashlib.sha1(names.encode("utf-8")).hexdigest()[:12]
+
+
 def default_slot_rows(job_type: str, weekly_type: str | None, uploaded_files: list[object]) -> list[dict[str, object]]:
     target_dates = infer_uploaded_dates(uploaded_files)
     if not target_dates:
@@ -129,7 +135,12 @@ def rows_to_custom_slots(rows: pd.DataFrame) -> CustomSlots:
     if rows.empty:
         return custom_slots
     for _, row in rows.iterrows():
+        core_values = [row.get("날짜"), row.get("회차명"), row.get("시작 시간"), row.get("소요 시간(분)")]
+        if all(pd.isna(value) or str(value).strip() == "" for value in core_values):
+            continue
         use_value = row.get("사용", True)
+        if pd.isna(use_value):
+            use_value = True
         if not bool(use_value):
             continue
         target = pd.to_datetime(row.get("날짜"), errors="coerce")
@@ -147,6 +158,12 @@ def rows_to_custom_slots(rows: pd.DataFrame) -> CustomSlots:
         custom_slots.setdefault(target.date(), tuple())
         custom_slots[target.date()] = (*custom_slots[target.date()], slot)
     return custom_slots
+
+
+def slot_editor_height(row_count: int) -> int:
+    """Return a tall-enough editor height so the schedule table does not feel cramped."""
+    visible_rows = max(int(row_count) + 3, 8)
+    return 80 + visible_rows * 35
 
 
 def build_download_filename(
@@ -415,22 +432,33 @@ def main() -> None:
 
     if job_type in {"samsung", "weekly"} and uploaded_files:
         with st.expander("회차 시간 설정", expanded=True):
-            st.caption("파일명에서 작업 대상 날짜를 읽어 날짜별 회차표를 자동 생성합니다. 시작 시간과 소요 시간을 수정한 뒤 분석할 수 있습니다.")
+            st.caption(
+                "파일명에서 작업 대상 날짜를 읽어 날짜별 회차표를 자동 생성합니다. "
+                "필요하면 날짜/회차명/시작 시간/소요 시간을 직접 수정하거나 행을 추가·삭제할 수 있습니다."
+            )
             try:
                 slot_rows = default_slot_rows(job_type, weekly_type, uploaded_files)
                 if slot_rows:
+                    slot_frame = pd.DataFrame(slot_rows)
+                    st.caption(
+                        "행 추가: 표 맨 아래 빈 행에 입력합니다. "
+                        "행 제외: `사용` 체크를 끄거나 행을 삭제합니다. "
+                        "`날짜`는 YYYY-MM-DD, `시작 시간`은 HH:MM 형식으로 입력합니다."
+                    )
                     edited_slots = st.data_editor(
-                        pd.DataFrame(slot_rows),
+                        slot_frame,
                         use_container_width=True,
                         hide_index=True,
                         num_rows="dynamic",
+                        height=slot_editor_height(len(slot_frame)),
                         column_config={
                             "사용": st.column_config.CheckboxColumn("사용"),
-                            "날짜": st.column_config.TextColumn("날짜", disabled=True),
+                            "날짜": st.column_config.TextColumn("날짜", help="YYYY-MM-DD 형식으로 입력"),
                             "회차명": st.column_config.TextColumn("회차명"),
                             "시작 시간": st.column_config.TextColumn("시작 시간", help="HH:MM 형식으로 입력"),
                             "소요 시간(분)": st.column_config.NumberColumn("소요 시간(분)", min_value=1, step=1),
                         },
+                        key=f"slot_editor_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
                     )
                     rule_settings["custom_slots"] = rows_to_custom_slots(edited_slots)
                 else:

@@ -14,12 +14,13 @@ from processors import process_detail, process_samsung, process_weekly
 from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_target_dates, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_xlsx
 from services.excel_writer import create_result_workbook
-from services.time_slotter import CustomSlots, slots_for_date
+from services.time_slotter import slots_for_date
 from services.validator import input_diagnostics
 from rules.weekly_rules import SlotRule
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_SAMSUNG_MODEL_PREFIXES = ("SM-",)
+CustomSlots = dict[date, tuple[SlotRule, ...]]
 
 JOB_TYPE_OPTIONS = {
     "삼성 취합": {

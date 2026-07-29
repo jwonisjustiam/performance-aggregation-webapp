@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import re
 
 import pandas as pd
@@ -15,6 +15,15 @@ REQUIRED = ("주문번호", "결제일시", "상품명", "주문 유입경로")
 DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
 RESULT_KEYS = ("final", "summary", "excluded", "duplicates", "errors", "extra_details")
 CustomSlots = dict[date, tuple[object, ...]]
+
+
+def _slot_duration_minutes(slot: object) -> int:
+    base = date(2000, 1, 1)
+    start_dt = datetime.combine(base, slot.start)
+    end_dt = datetime.combine(base, slot.end)
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+    return max(1, int((end_dt - start_dt).total_seconds() // 60))
 WEARABLE_SKUS = {
     "SM-L340NZEAKOO",
     "SM-L340NZKAKOO",
@@ -266,13 +275,14 @@ def process_weekly(
             rows.append(
                 {
                     "날짜": broadcast_date,
-                    "시간": slot.label,
+                    "시간": slot.start.strftime("%H:%M"),
+                    "duration (분)": _slot_duration_minutes(slot),
                     "수량": int(part["주문번호"].nunique()),
                     "전환율": 0,
                     "금액(백만)": to_millions(part["_amount"].sum()),
                 }
             )
-    final = pd.DataFrame(rows, columns=["날짜", "시간", "수량", "전환율", "금액(백만)"])
+    final = pd.DataFrame(rows, columns=["날짜", "시간", "duration (분)", "수량", "전환율", "금액(백만)"])
     return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}
 
 

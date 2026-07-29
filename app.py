@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 import tempfile
+from inspect import signature
 
 import pandas as pd
 import streamlit as st
 
 from processors import process_detail, process_samsung, process_weekly
-from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
+from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_target_dates, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_xlsx
 from services.excel_writer import create_result_workbook
+from services.time_slotter import CustomSlots, slots_for_date
 from services.validator import input_diagnostics
+from rules.weekly_rules import SlotRule
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+DEFAULT_SAMSUNG_MODEL_PREFIXES = ("SM-",)
 
 JOB_TYPE_OPTIONS = {
     "삼성 취합": {
@@ -51,6 +56,10 @@ def parse_rule_values(text: str) -> set[str]:
     return set(values)
 
 
+def parse_prefix_values(text: str) -> tuple[str, ...]:
+    return tuple(sorted(parse_rule_values(text)))
+
+
 def safe_datetime_series(value: object) -> pd.Series:
     """Convert optional date-like input to a Series that always supports dropna()."""
     if value is None:
@@ -63,6 +72,80 @@ def safe_datetime_series(value: object) -> pd.Series:
     if pd.isna(converted):
         return pd.Series(dtype="datetime64[ns]")
     return pd.Series([converted])
+
+
+def parse_time_text(value: object) -> time:
+    text = str(value or "").strip()
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).time()
+        except ValueError:
+            continue
+    raise ValueError(f"시간 형식이 올바르지 않습니다: {text}. 예: 23:00")
+
+
+def slot_duration_minutes(slot: SlotRule) -> int:
+    base = date(2026, 1, 1)
+    start = datetime.combine(base, slot.start)
+    end = datetime.combine(base, slot.end)
+    if end <= start:
+        end += timedelta(days=1)
+    return max(1, int((end - start).total_seconds() // 60))
+
+
+def infer_uploaded_dates(uploaded_files: list[object]) -> list[date]:
+    combined_names = " | ".join(Path(getattr(item, "name", "") or "").name for item in uploaded_files)
+    return infer_target_dates(combined_names) or []
+
+
+def default_slot_rows(job_type: str, weekly_type: str | None, uploaded_files: list[object]) -> list[dict[str, object]]:
+    target_dates = infer_uploaded_dates(uploaded_files)
+    if not target_dates:
+        return []
+    combined_names = " | ".join(Path(getattr(item, "name", "") or "").name for item in uploaded_files)
+    if job_type == "samsung":
+        kind = "wearable"
+    else:
+        selected = None if weekly_type in {None, "", "auto"} else weekly_type
+        kind = infer_weekly_kind(combined_names, selected)
+    rows: list[dict[str, object]] = []
+    for target in target_dates:
+        for slot in slots_for_date(kind, target):
+            rows.append(
+                {
+                    "사용": True,
+                    "날짜": target.isoformat(),
+                    "회차명": slot.label,
+                    "시작 시간": slot.start.strftime("%H:%M"),
+                    "소요 시간(분)": slot_duration_minutes(slot),
+                }
+            )
+    return rows
+
+
+def rows_to_custom_slots(rows: pd.DataFrame) -> CustomSlots:
+    custom_slots: CustomSlots = {}
+    if rows.empty:
+        return custom_slots
+    for _, row in rows.iterrows():
+        use_value = row.get("사용", True)
+        if not bool(use_value):
+            continue
+        target = pd.to_datetime(row.get("날짜"), errors="coerce")
+        if pd.isna(target):
+            raise ValueError(f"회차표 날짜가 올바르지 않습니다: {row.get('날짜')}")
+        label = str(row.get("회차명") or "").strip()
+        if not label:
+            raise ValueError("회차명은 비워둘 수 없습니다.")
+        start = parse_time_text(row.get("시작 시간"))
+        duration = int(pd.to_numeric(row.get("소요 시간(분)"), errors="raise"))
+        if duration <= 0:
+            raise ValueError("소요 시간은 1분 이상이어야 합니다.")
+        end_dt = datetime.combine(target.date(), start) + timedelta(minutes=duration)
+        slot = SlotRule(label, start, end_dt.time())
+        custom_slots.setdefault(target.date(), tuple())
+        custom_slots[target.date()] = (*custom_slots[target.date()], slot)
+    return custom_slots
 
 
 def build_download_filename(
@@ -189,12 +272,12 @@ def analyze_uploaded_files(
     job_type: str,
     weekly_type: str | None,
     uploaded_files: list[object],
-    detail_rules: dict[str, set[str]] | None = None,
+    rule_settings: dict[str, object] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     with tempfile.TemporaryDirectory() as temporary:
         temp_dir = Path(temporary)
         frame, combined_names, file_info = read_uploaded_workbooks(uploaded_files, temp_dir)
-        return analyze_frame(job_type, weekly_type, frame, combined_names, file_info, detail_rules)
+        return analyze_frame(job_type, weekly_type, frame, combined_names, file_info, rule_settings)
 
 
 def analyze_frame(
@@ -203,7 +286,7 @@ def analyze_frame(
     frame: pd.DataFrame,
     combined_names: str,
     file_info: list[dict[str, object]],
-    detail_rules: dict[str, set[str]] | None = None,
+    rule_settings: dict[str, object] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     payment_dates = pd.to_datetime(frame.get("결제일시"), errors="coerce") if "결제일시" in frame else pd.Series(dtype="datetime64[ns]")
     diagnostics = input_diagnostics(frame, ["주문번호", "결제일시", "상품명", "주문 유입경로"])
@@ -212,19 +295,29 @@ def analyze_frame(
     if job_type == "weekly":
         selected = None if weekly_type in {None, "", "auto"} else weekly_type
         weekly_kind = infer_weekly_kind(combined_names, selected)
-        result = process_weekly(frame, combined_names, selected)
+        weekly_kwargs = {}
+        if "allowed_skus" in signature(process_weekly).parameters:
+            weekly_kwargs["allowed_skus"] = None if rule_settings is None else rule_settings.get("weekly_skus")
+        if "custom_slots" in signature(process_weekly).parameters:
+            weekly_kwargs["custom_slots"] = None if rule_settings is None else rule_settings.get("custom_slots")
+        result = process_weekly(frame, combined_names, selected, **weekly_kwargs)
     elif job_type == "detail":
         weekly_kind = None
-        result = process_detail(
-            frame,
-            combined_names,
-            None,
-            wearable_skus=None if detail_rules is None else detail_rules.get("wearable_skus"),
-            mobile_acc_skus=None if detail_rules is None else detail_rules.get("mobile_acc_skus"),
-        )
+        detail_kwargs = {}
+        detail_parameters = signature(process_detail).parameters
+        if "wearable_skus" in detail_parameters:
+            detail_kwargs["wearable_skus"] = None if rule_settings is None else rule_settings.get("wearable_skus")
+        if "mobile_acc_skus" in detail_parameters:
+            detail_kwargs["mobile_acc_skus"] = None if rule_settings is None else rule_settings.get("mobile_acc_skus")
+        result = process_detail(frame, combined_names, None, **detail_kwargs)
     else:
         weekly_kind = None
-        result = process_samsung(frame, combined_names)
+        samsung_kwargs = {}
+        if "model_prefixes" in signature(process_samsung).parameters:
+            samsung_kwargs["model_prefixes"] = None if rule_settings is None else rule_settings.get("samsung_model_prefixes")
+        if "custom_slots" in signature(process_samsung).parameters:
+            samsung_kwargs["custom_slots"] = None if rule_settings is None else rule_settings.get("custom_slots")
+        result = process_samsung(frame, combined_names, **samsung_kwargs)
 
     filename = build_download_filename(job_type, result, payment_dates, weekly_kind)
     if job_type == "detail":
@@ -248,11 +341,12 @@ def render_usage_guide() -> None:
             """
             1. 왼쪽에서 `업무 유형`을 먼저 선택하세요.
             2. 업무 유형은 `삼성 취합`, `위클리 취합`, `워치9 사전판매 판매 실적 취합` 3가지입니다.
-            3. 위클리 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
-            4. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 옵션 관리 코드 또는 판매자 상품 코드의 SKU 목록으로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
-            5. 워치9 사전판매 판매 실적 취합에서는 화면의 SKU 목록을 직접 수정한 뒤 분석할 수 있습니다.
-            6. 삼성 취합은 주문 Raw Data 엑셀만 업로드하면 됩니다.
-            7. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
+            3. 삼성 취합은 `삼성 모델/SKU 시작값`을 화면에서 수정할 수 있습니다. 기본값은 `SM-`입니다.
+            4. 위클리 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
+            5. 위클리 취합은 `위클리 포함 SKU 목록`을 비워두면 기존처럼 전체 쇼핑라이브 주문을 취합하고, 값을 입력하면 해당 SKU만 취합합니다.
+            6. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 옵션 관리 코드 또는 판매자 상품 코드의 SKU 목록으로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
+            7. 워치9 사전판매 판매 실적 취합에서는 화면의 SKU 목록을 직접 수정한 뒤 분석할 수 있습니다.
+            8. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
             """
         )
 
@@ -266,10 +360,28 @@ def main() -> None:
         selected_job = JOB_TYPE_OPTIONS[job_type_label]
         job_type = selected_job["code"]
         weekly_type = None
-        detail_rules = None
+        rule_settings: dict[str, object] = {}
         if job_type == "weekly":
             weekly_label = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
             weekly_type = {"자동 판정": "auto", "외장하드": "external", "웨어러블": "wearable"}[weekly_label]
+            st.subheader("위클리 분류 규칙")
+            st.caption("비워두면 기존처럼 모든 쇼핑라이브 주문을 취합합니다. 특정 SKU만 취합하려면 옵션 관리 코드 또는 판매자 상품 코드를 입력하세요.")
+            weekly_rule_text = st.text_area(
+                "위클리 포함 SKU 목록",
+                value="",
+                height=120,
+                placeholder="예: SM-R390NZSAKOO, ET-SNL34SBEGKR",
+            )
+            rule_settings["weekly_skus"] = parse_rule_values(weekly_rule_text)
+        elif job_type == "samsung":
+            st.subheader("삼성 분류 규칙")
+            st.caption("기본값은 SM- 전체입니다. 쉼표 또는 줄바꿈으로 시작값을 수정할 수 있습니다.")
+            samsung_prefix_text = st.text_area(
+                "삼성 모델/SKU 시작값",
+                value=format_rule_values(set(DEFAULT_SAMSUNG_MODEL_PREFIXES)),
+                height=90,
+            )
+            rule_settings["samsung_model_prefixes"] = parse_prefix_values(samsung_prefix_text)
         elif job_type == "detail":
             st.subheader("워치9 분류 규칙")
             st.caption("쉼표 또는 줄바꿈으로 구분해서 수정할 수 있습니다. 비워두면 해당 버전 결과가 0건으로 나옵니다.")
@@ -283,10 +395,10 @@ def main() -> None:
                 value=format_rule_values(MOBILE_ACC_SKUS),
                 height=220,
             )
-            detail_rules = {
+            rule_settings.update({
                 "wearable_skus": parse_rule_values(wearable_rule_text),
                 "mobile_acc_skus": parse_rule_values(mobile_acc_rule_text),
-            }
+            })
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
@@ -300,6 +412,31 @@ def main() -> None:
         key=f"raw_files_{job_type}",
     )
 
+    if job_type in {"samsung", "weekly"} and uploaded_files:
+        with st.expander("회차 시간 설정", expanded=True):
+            st.caption("파일명에서 작업 대상 날짜를 읽어 날짜별 회차표를 자동 생성합니다. 시작 시간과 소요 시간을 수정한 뒤 분석할 수 있습니다.")
+            try:
+                slot_rows = default_slot_rows(job_type, weekly_type, uploaded_files)
+                if slot_rows:
+                    edited_slots = st.data_editor(
+                        pd.DataFrame(slot_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="dynamic",
+                        column_config={
+                            "사용": st.column_config.CheckboxColumn("사용"),
+                            "날짜": st.column_config.TextColumn("날짜", disabled=True),
+                            "회차명": st.column_config.TextColumn("회차명"),
+                            "시작 시간": st.column_config.TextColumn("시작 시간", help="HH:MM 형식으로 입력"),
+                            "소요 시간(분)": st.column_config.NumberColumn("소요 시간(분)", min_value=1, step=1),
+                        },
+                    )
+                    rule_settings["custom_slots"] = rows_to_custom_slots(edited_slots)
+                else:
+                    st.info("파일명에서 작업 대상 날짜를 찾지 못했습니다. 예: `20260724~20260726` 형식이 있으면 회차표를 자동 생성합니다.")
+            except Exception as exc:
+                st.warning(f"회차표를 만들 수 없습니다: {exc}")
+
     if st.button("분석 시작", type="primary"):
         try:
             with st.spinner("엑셀을 읽고 실적을 취합 중입니다."):
@@ -307,7 +444,7 @@ def main() -> None:
                     job_type,
                     weekly_type,
                     uploaded_files,
-                    detail_rules,
+                    rule_settings,
                 )
             show_result(job_type, result, content, filename, summary, file_info, diagnostics, validation, common_orders)
         except Exception as exc:

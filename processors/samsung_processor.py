@@ -11,10 +11,11 @@ from processors.weekly_processor import infer_target_dates
 from rules.samsung_rules import DEFAULT_BROADCAST_VALUES
 from services.amount_resolver import resolve_amount
 from services.result_formatter import shorten_model
-from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
+from services.time_slotter import CustomSlots, assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명", "수량", "상품가격", "옵션가격", "주문 유입경로")
+DEFAULT_MODEL_PREFIXES = ("SM-",)
 
 
 def _select_model_code(row: pd.Series) -> str:
@@ -39,6 +40,8 @@ def process_samsung(
     raw_df: pd.DataFrame,
     file_name: str = "",
     optional_broadcast_df: pd.DataFrame | None = None,
+    model_prefixes: tuple[str, ...] | None = None,
+    custom_slots: CustomSlots | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Aggregate Samsung SM orders into the three required result sheets."""
     missing = missing_columns(raw_df, REQUIRED)
@@ -53,24 +56,33 @@ def process_samsung(
     source["_payment"] = pd.to_datetime(source["결제일시"], errors="coerce")
     source["_code"] = source.apply(_select_model_code, axis=1)
     source["_model"] = source["_code"].map(shorten_model)
+    active_prefixes = tuple(prefix.strip().upper() for prefix in (model_prefixes or DEFAULT_MODEL_PREFIXES) if prefix.strip())
+    if not active_prefixes:
+        active_prefixes = DEFAULT_MODEL_PREFIXES
+    source["_target_model"] = source["_model"].str.startswith(active_prefixes)
     source["_live"] = source["주문 유입경로"].astype(str).str.strip().eq("쇼핑라이브")
     amounts = source.apply(resolve_amount, axis=1)
     source["_amount"] = [item[0] for item in amounts]
     target_dates = infer_target_dates(file_name)
     fallback_target = _target_date(source)
     source["_broadcast_date"] = source["_payment"].map(inferred_broadcast_date)
-    assigned = source.apply(
-        lambda row: assign_slot(row["_payment"], "wearable", row["_broadcast_date"]) if row["_broadcast_date"] else None,
-        axis=1,
-    )
+    if custom_slots:
+        assigned = source.apply(lambda row: assign_slot(row["_payment"], "wearable", custom_slots=custom_slots), axis=1)
+    else:
+        assigned = source.apply(
+            lambda row: assign_slot(row["_payment"], "wearable", row["_broadcast_date"]) if row["_broadcast_date"] else None,
+            axis=1,
+        )
+    if custom_slots:
+        source["_broadcast_date"] = [item[0] if item else None for item in assigned]
     source["_slot"] = [item[1] if item else None for item in assigned]
     source["_target_date_ok"] = True if target_dates is None else source["_broadcast_date"].isin(target_dates)
     source["_disabled_slot"] = source.apply(
         lambda row: session_is_disabled("wearable", row["_broadcast_date"], row["_slot"]) if row["_broadcast_date"] else False,
         axis=1,
     )
-    source["_date_ok"] = source["_slot"].notna() & source["_target_date_ok"] & ~source["_disabled_slot"]
-    eligible = source["_live"] & source["_model"].str.startswith("SM-") & source["_date_ok"] & source["_amount"].notna()
+    source["_date_ok"] = source["_slot"].notna() & source["_target_date_ok"] & (True if custom_slots else ~source["_disabled_slot"])
+    eligible = source["_live"] & source["_target_model"] & source["_date_ok"] & source["_amount"].notna()
 
     verification_rows: list[dict[str, object]] = []
     representative_rows: list[pd.Series] = []
@@ -80,8 +92,8 @@ def process_samsung(
         if valid.empty:
             if not group["_live"].any():
                 reason = "쇼핑라이브 없음—제외"
-            elif not group["_model"].str.startswith("SM-").any():
-                reason = "비-SM 모델—제외"
+            elif not group["_target_model"].any():
+                reason = "대상 모델 규칙 밖—제외"
             elif not group["_target_date_ok"].any():
                 reason = "작업 날짜 범위 밖—제외"
             elif not group["_date_ok"].any():
@@ -101,8 +113,8 @@ def process_samsung(
             {
                 "주문번호": order_number,
                 "결제일시": group["_payment"].min(),
-                "쇼핑라이브 SM 원본 행 수": int((group["_live"] & group["_model"].str.startswith("SM-")).sum()),
-                "확인된 모델": ", ".join(sorted(set(group.loc[group["_model"].str.startswith("SM-"), "_model"]))),
+                "쇼핑라이브 SM 원본 행 수": int((group["_live"] & group["_target_model"]).sum()),
+                "확인된 모델": ", ".join(sorted(set(group.loc[group["_target_model"], "_model"]))),
                 "대표 모델": "" if representative is None else representative["_model"],
                 "주문 금액": 0 if representative is None else representative["_order_amount"],
                 "처리 기준": reason,
@@ -113,7 +125,7 @@ def process_samsung(
     summary_rows: list[dict[str, object]] = []
     output_dates = target_dates or sorted(source.loc[source["_date_ok"], "_broadcast_date"].dropna().unique()) or [fallback_target]
     for target in output_dates:
-        for slot in slots_for_date("wearable", target):
+        for slot in slots_for_date("wearable", target, custom_slots):
             if not representatives.empty:
                 part = representatives[(representatives["_broadcast_date"] == target) & (representatives["_slot"] == slot.label)]
             else:

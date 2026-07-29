@@ -8,7 +8,7 @@ import re
 import pandas as pd
 
 from services.amount_resolver import resolve_amount, to_millions
-from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
+from services.time_slotter import CustomSlots, assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명", "주문 유입경로")
@@ -172,10 +172,18 @@ def _normalize_sku(value: object) -> str:
     return re.sub(r"\s+", "", str(value or "")).upper()
 
 
+def _matches_optional_sku_filter(row: pd.Series, allowed_skus: set[str] | None) -> bool:
+    if not allowed_skus:
+        return True
+    return _normalize_sku(_selected_option_code(row)) in allowed_skus
+
+
 def _prepare_weekly_source(
     raw_df: pd.DataFrame,
     file_name: str,
     selected_type: str | None,
+    allowed_skus: set[str] | None = None,
+    custom_slots: CustomSlots | None = None,
 ) -> tuple[str, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Apply shared weekly/detail inclusion rules and return prepared frames."""
     missing = missing_columns(raw_df, REQUIRED)
@@ -190,6 +198,7 @@ def _prepare_weekly_source(
     source["_row"] = range(len(source))
     source["_payment"] = pd.to_datetime(source["결제일시"], errors="coerce")
     source["_live"] = source.apply(_is_live, axis=1)
+    source["_sku_filter_ok"] = source.apply(lambda row: _matches_optional_sku_filter(row, allowed_skus), axis=1)
     resolved = source.apply(resolve_amount, axis=1)
     source["_amount"] = [item[0] for item in resolved]
     source["_amount_basis"] = [item[1] for item in resolved]
@@ -204,10 +213,15 @@ def _prepare_weekly_source(
         duplicates = pd.concat([duplicates, source.loc[product_duplicate_mask].copy()], ignore_index=True)
         source = source.loc[~product_duplicate_mask].copy()
     source["_broadcast_date"] = source["_payment"].map(inferred_broadcast_date)
-    assignments = source.apply(
-        lambda row: assign_slot(row["_payment"], kind, row["_broadcast_date"]) if row["_broadcast_date"] else None,
-        axis=1,
-    )
+    if custom_slots:
+        assignments = source.apply(lambda row: assign_slot(row["_payment"], kind, custom_slots=custom_slots), axis=1)
+    else:
+        assignments = source.apply(
+            lambda row: assign_slot(row["_payment"], kind, row["_broadcast_date"]) if row["_broadcast_date"] else None,
+            axis=1,
+        )
+    if custom_slots:
+        source["_broadcast_date"] = [item[0] if item else None for item in assignments]
     source["_slot"] = [item[1] if item else None for item in assignments]
     source["_disabled_slot"] = source.apply(
         lambda row: session_is_disabled(kind, row["_broadcast_date"], row["_slot"]) if row["_broadcast_date"] else False,
@@ -219,8 +233,9 @@ def _prepare_weekly_source(
         invalid_order
         | source["_payment"].isna()
         | ~source["_live"]
+        | ~source["_sku_filter_ok"]
         | source["_slot"].isna()
-        | source["_disabled_slot"]
+        | (False if custom_slots else source["_disabled_slot"])
         | ~source["_target_date_ok"]
         | source["_amount"].isna()
     )
@@ -228,16 +243,24 @@ def _prepare_weekly_source(
     included = source.loc[~invalid].copy()
     errors = source.loc[source["_payment"].isna() | source["_amount"].isna()].copy()
     source.attrs["target_dates"] = target_dates
+    source.attrs["custom_slots"] = custom_slots
     return kind, source, included, excluded, duplicates, errors
 
 
-def process_weekly(raw_df: pd.DataFrame, file_name: str, selected_type: str | None = None) -> dict[str, pd.DataFrame]:
+def process_weekly(
+    raw_df: pd.DataFrame,
+    file_name: str,
+    selected_type: str | None = None,
+    allowed_skus: set[str] | None = None,
+    custom_slots: CustomSlots | None = None,
+) -> dict[str, pd.DataFrame]:
     """Aggregate a weekly raw-order dataframe by broadcast date and slot."""
-    kind, source, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type)
+    kind, source, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type, allowed_skus, custom_slots)
     dates = source.attrs.get("target_dates") or sorted(date_value for date_value in source["_broadcast_date"].dropna().unique())
     rows: list[dict[str, object]] = []
+    active_custom_slots = source.attrs.get("custom_slots")
     for broadcast_date in dates:
-        for slot in slots_for_date(kind, broadcast_date):
+        for slot in slots_for_date(kind, broadcast_date, active_custom_slots):
             part = included[(included["_broadcast_date"] == broadcast_date) & (included["_slot"] == slot.label)]
             rows.append(
                 {

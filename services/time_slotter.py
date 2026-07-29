@@ -18,8 +18,13 @@ from rules.weekly_rules import (
 )
 
 
-def slots_for_date(kind: str, broadcast_date: date) -> tuple[SlotRule, ...]:
+CustomSlots = dict[date, tuple[SlotRule, ...]]
+
+
+def slots_for_date(kind: str, broadcast_date: date, custom_slots: CustomSlots | None = None) -> tuple[SlotRule, ...]:
     """Return configured slots for a date and weekly file type."""
+    if custom_slots and broadcast_date in custom_slots:
+        return custom_slots[broadcast_date]
     if kind == "wearable":
         slots = WEARABLE_DATE_OVERRIDES.get(broadcast_date, WEARABLE_SLOTS)
     elif kind == "external":
@@ -61,6 +66,7 @@ def assign_slot(
     kind: str,
     candidate_date: date | None = None,
     slots: Sequence[SlotRule] | None = None,
+    custom_slots: CustomSlots | None = None,
 ) -> tuple[date, str] | None:
     """Assign one payment timestamp to one nearest eligible slot."""
     parsed = pd.to_datetime(value, errors="coerce")
@@ -71,7 +77,9 @@ def assign_slot(
     candidates: list[tuple[float, float, date, str]] = []
     tolerance = timedelta(minutes=TOLERANCE_MINUTES)
     for broadcast_date in dates:
-        current_slots = tuple(slots) if slots is not None else slots_for_date(kind, broadcast_date)
+        if custom_slots is not None and broadcast_date not in custom_slots:
+            continue
+        current_slots = tuple(slots) if slots is not None else slots_for_date(kind, broadcast_date, custom_slots)
         for slot in current_slots:
             start, end = slot_bounds(broadcast_date, slot)
             effective_start, effective_end = effective_slot_bounds(broadcast_date, slot)

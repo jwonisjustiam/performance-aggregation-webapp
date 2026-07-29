@@ -1,2 +1,1 @@
-"""Configurable business rules."""
-
+"""Business rules for performance aggregation."""

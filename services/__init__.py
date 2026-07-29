@@ -1,2 +1,1 @@
 """Shared spreadsheet services."""
-

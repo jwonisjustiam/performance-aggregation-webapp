@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 from inspect import signature
 import hashlib
+import json
 
 import pandas as pd
 import streamlit as st
@@ -122,7 +123,6 @@ def default_slot_rows(job_type: str, weekly_type: str | None, uploaded_files: li
                 {
                     "사용": True,
                     "날짜": target.isoformat(),
-                    "회차명": slot.label,
                     "시작 시간": slot.start.strftime("%H:%M"),
                     "소요 시간(분)": slot_duration_minutes(slot),
                 }
@@ -130,12 +130,79 @@ def default_slot_rows(job_type: str, weekly_type: str | None, uploaded_files: li
     return rows
 
 
+def normalize_template_sessions(rows: pd.DataFrame | list[dict[str, object]]) -> list[dict[str, object]]:
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return []
+    sessions: list[dict[str, object]] = []
+    seen: set[tuple[str, int]] = set()
+    for _, row in frame.iterrows():
+        core_values = [row.get("시작 시간"), row.get("소요 시간(분)")]
+        if all(pd.isna(value) or str(value).strip() == "" for value in core_values):
+            continue
+        use_value = row.get("사용", True)
+        if pd.isna(use_value):
+            use_value = True
+        if not bool(use_value):
+            continue
+        start = parse_time_text(row.get("시작 시간")).strftime("%H:%M")
+        duration = int(pd.to_numeric(row.get("소요 시간(분)"), errors="raise"))
+        if duration <= 0:
+            raise ValueError("소요 시간은 1분 이상이어야 합니다.")
+        key = (start, duration)
+        if key in seen:
+            continue
+        seen.add(key)
+        sessions.append({"사용": True, "시작 시간": start, "소요 시간(분)": duration})
+    return sessions
+
+
+def template_sessions_to_slot_rows(sessions: list[dict[str, object]], uploaded_files: list[object]) -> list[dict[str, object]]:
+    target_dates = infer_uploaded_dates(uploaded_files)
+    rows: list[dict[str, object]] = []
+    for target in target_dates:
+        for session in sessions:
+            rows.append(
+                {
+                    "사용": bool(session.get("사용", True)),
+                    "날짜": target.isoformat(),
+                    "시작 시간": parse_time_text(session.get("시작 시간")).strftime("%H:%M"),
+                    "소요 시간(분)": int(pd.to_numeric(session.get("소요 시간(분)"), errors="raise")),
+                }
+            )
+    return rows
+
+
+def template_json_bytes(name: str, rows: pd.DataFrame) -> bytes:
+    payload = {
+        "name": name.strip() or "시간 템플릿",
+        "sessions": normalize_template_sessions(rows),
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def load_template_sessions(uploaded_template: object) -> list[dict[str, object]]:
+    payload = json.loads(uploaded_template.getvalue().decode("utf-8-sig"))
+    if isinstance(payload, list):
+        sessions = payload
+    elif isinstance(payload, dict):
+        sessions = payload.get("sessions", [])
+    else:
+        raise ValueError("템플릿 JSON 형식이 올바르지 않습니다.")
+    return normalize_template_sessions(sessions)
+
+
+def slot_frame_key(frame: pd.DataFrame) -> str:
+    text = frame.to_json(force_ascii=False, orient="records")
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
 def rows_to_custom_slots(rows: pd.DataFrame) -> CustomSlots:
     custom_slots: CustomSlots = {}
     if rows.empty:
         return custom_slots
     for _, row in rows.iterrows():
-        core_values = [row.get("날짜"), row.get("회차명"), row.get("시작 시간"), row.get("소요 시간(분)")]
+        core_values = [row.get("날짜"), row.get("시작 시간"), row.get("소요 시간(분)")]
         if all(pd.isna(value) or str(value).strip() == "" for value in core_values):
             continue
         use_value = row.get("사용", True)
@@ -146,10 +213,8 @@ def rows_to_custom_slots(rows: pd.DataFrame) -> CustomSlots:
         target = pd.to_datetime(row.get("날짜"), errors="coerce")
         if pd.isna(target):
             raise ValueError(f"회차표 날짜가 올바르지 않습니다: {row.get('날짜')}")
-        label = str(row.get("회차명") or "").strip()
-        if not label:
-            raise ValueError("회차명은 비워둘 수 없습니다.")
         start = parse_time_text(row.get("시작 시간"))
+        label = start.strftime("%H:%M")
         duration = int(pd.to_numeric(row.get("소요 시간(분)"), errors="raise"))
         if duration <= 0:
             raise ValueError("소요 시간은 1분 이상이어야 합니다.")
@@ -420,6 +485,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
+    st.caption("배포 버전: 2026-07-29 시간표 저장·불러오기")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -434,11 +500,36 @@ def main() -> None:
         with st.expander("회차 시간 설정", expanded=True):
             st.caption(
                 "파일명에서 작업 대상 날짜를 읽어 날짜별 회차표를 자동 생성합니다. "
-                "필요하면 날짜/회차명/시작 시간/소요 시간을 직접 수정하거나 행을 추가·삭제할 수 있습니다."
+                "필요하면 날짜/시작 시간/소요 시간을 직접 수정하거나 행을 추가·삭제할 수 있습니다."
             )
             try:
+                if "slot_templates" not in st.session_state:
+                    st.session_state["slot_templates"] = {}
+
                 slot_rows = default_slot_rows(job_type, weekly_type, uploaded_files)
                 if slot_rows:
+                    template_key_parts = ["default"]
+                    saved_templates: dict[str, list[dict[str, object]]] = st.session_state["slot_templates"]
+                    if saved_templates:
+                        selected_template = st.selectbox(
+                            "저장된 시간 템플릿 불러오기",
+                            ["자동 생성값 사용"] + sorted(saved_templates),
+                            key=f"template_select_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                        )
+                        if selected_template != "자동 생성값 사용":
+                            slot_rows = template_sessions_to_slot_rows(saved_templates[selected_template], uploaded_files)
+                            template_key_parts.append(selected_template)
+
+                    uploaded_template = st.file_uploader(
+                        "시간 템플릿 JSON 파일 불러오기",
+                        type=["json"],
+                        key=f"slot_template_upload_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                    )
+                    if uploaded_template is not None:
+                        imported_sessions = load_template_sessions(uploaded_template)
+                        slot_rows = template_sessions_to_slot_rows(imported_sessions, uploaded_files)
+                        template_key_parts.append(uploaded_template.name)
+
                     slot_frame = pd.DataFrame(slot_rows)
                     st.caption(
                         "행 추가: 표 맨 아래 빈 행에 입력합니다. "
@@ -454,13 +545,34 @@ def main() -> None:
                         column_config={
                             "사용": st.column_config.CheckboxColumn("사용"),
                             "날짜": st.column_config.TextColumn("날짜", help="YYYY-MM-DD 형식으로 입력"),
-                            "회차명": st.column_config.TextColumn("회차명"),
                             "시작 시간": st.column_config.TextColumn("시작 시간", help="HH:MM 형식으로 입력"),
                             "소요 시간(분)": st.column_config.NumberColumn("소요 시간(분)", min_value=1, step=1),
                         },
-                        key=f"slot_editor_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                        key=f"slot_editor_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}_{slot_frame_key(slot_frame)}_{hashlib.sha1('|'.join(template_key_parts).encode('utf-8')).hexdigest()[:8]}",
                     )
                     rule_settings["custom_slots"] = rows_to_custom_slots(edited_slots)
+                    st.divider()
+                    template_name = st.text_input(
+                        "현재 시간표 템플릿 이름",
+                        value=f"{selected_job['title']} 시간 템플릿",
+                        key=f"slot_template_name_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                    )
+                    save_col, download_col = st.columns(2)
+                    with save_col:
+                        if st.button(
+                            "현재 시간표 임시 저장",
+                            key=f"slot_template_save_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                        ):
+                            st.session_state["slot_templates"][template_name.strip() or "시간 템플릿"] = normalize_template_sessions(edited_slots)
+                            st.success("현재 접속 중 사용할 수 있는 시간 템플릿으로 저장했습니다.")
+                    with download_col:
+                        st.download_button(
+                            "현재 시간표 JSON 다운로드",
+                            data=template_json_bytes(template_name, edited_slots),
+                            file_name=f"{template_name.strip() or '시간_템플릿'}.json",
+                            mime="application/json",
+                            key=f"slot_template_download_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                        )
                 else:
                     st.info("파일명에서 작업 대상 날짜를 찾지 못했습니다. 예: `20260724~20260726` 형식이 있으면 회차표를 자동 생성합니다.")
             except Exception as exc:

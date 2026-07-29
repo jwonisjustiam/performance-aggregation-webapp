@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 
@@ -11,11 +11,21 @@ from processors.weekly_processor import infer_target_dates
 from rules.samsung_rules import DEFAULT_BROADCAST_VALUES
 from services.amount_resolver import resolve_amount
 from services.result_formatter import shorten_model
-from services.time_slotter import CustomSlots, assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
+from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명", "수량", "상품가격", "옵션가격", "주문 유입경로")
 DEFAULT_MODEL_PREFIXES = ("SM-",)
+CustomSlots = dict[date, tuple[object, ...]]
+
+
+def _slot_duration_minutes(slot: object) -> int:
+    base = date(2000, 1, 1)
+    start_dt = datetime.combine(base, slot.start)
+    end_dt = datetime.combine(base, slot.end)
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+    return max(1, int((end_dt - start_dt).total_seconds() // 60))
 
 
 def _select_model_code(row: pd.Series) -> str:
@@ -132,14 +142,19 @@ def process_samsung(
                 part = representatives
             counts = part.groupby("_model")["주문번호"].nunique().to_dict() if not part.empty else {}
             models = sorted(counts, key=lambda model: (model != "SM-R390", model)) or [""]
+            duration = _slot_duration_minutes(slot)
+            production_owner = "" if duration in {60, 90} else DEFAULT_BROADCAST_VALUES.get("제작 주체", "")
             for model in models:
+                row_defaults = dict(DEFAULT_BROADCAST_VALUES)
+                row_defaults["제작 주체"] = production_owner
+                row_defaults["DURATION (분)"] = duration
                 integrated.append(
                     {
                         "월": target.month,
                         "일": target.day,
                         "요일": "월화수목금토일"[target.weekday()],
-                        **DEFAULT_BROADCAST_VALUES,
-                        "시간": slot.label,
+                        **row_defaults,
+                        "시간": slot.start.strftime("%H:%M"),
                         "모델": model,
                         "실적(대)": int(counts.get(model, 0)),
                     }
@@ -154,7 +169,7 @@ def process_samsung(
                     "총 금액": "" if part.empty else float(part["_order_amount"].sum()),
                 }
             )
-    final_columns = ["월", "일", "요일", "플랫폼", "제작 주체", "시간", "Duration (분)", "담당/SOP", "View(만)", "모델", "실적(대)"]
+    final_columns = ["월", "일", "요일", "플랫폼", "제작 주체", "시간", "DURATION (분)", "담당/SOP", "View(만)", "모델", "실적(대)"]
     final = pd.DataFrame(integrated)[final_columns]
     summary = pd.DataFrame(summary_rows)
     duplicates = pd.DataFrame(verification_rows)

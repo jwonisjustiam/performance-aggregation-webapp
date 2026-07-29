@@ -23,6 +23,9 @@ from rules.weekly_rules import SlotRule
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_SAMSUNG_MODEL_PREFIXES = ("SM-",)
 CustomSlots = dict[date, tuple[SlotRule, ...]]
+GLOBAL_SLOT_TEMPLATES_KEY = "global_slot_templates"
+LEGACY_SLOT_TEMPLATES_KEY = "slot_templates"
+GLOBAL_SLOT_TEMPLATE_SELECTION_KEY = "global_slot_template_selection"
 
 JOB_TYPE_OPTIONS = {
     "삼성 취합": {
@@ -179,6 +182,16 @@ def template_json_bytes(name: str, rows: pd.DataFrame) -> bytes:
         "sessions": normalize_template_sessions(rows),
     }
     return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def get_global_slot_templates() -> dict[str, list[dict[str, object]]]:
+    """Return one in-session template library shared by Samsung and weekly jobs."""
+    if GLOBAL_SLOT_TEMPLATES_KEY not in st.session_state:
+        legacy_templates = st.session_state.get(LEGACY_SLOT_TEMPLATES_KEY, {})
+        st.session_state[GLOBAL_SLOT_TEMPLATES_KEY] = (
+            dict(legacy_templates) if isinstance(legacy_templates, dict) else {}
+        )
+    return st.session_state[GLOBAL_SLOT_TEMPLATES_KEY]
 
 
 def load_template_sessions(uploaded_template: object) -> list[dict[str, object]]:
@@ -485,7 +498,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-07-29 시간표 저장·불러오기")
+    st.caption("배포 버전: 2026-07-29 공용 시간표 템플릿")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -502,19 +515,19 @@ def main() -> None:
                 "파일명에서 작업 대상 날짜를 읽어 날짜별 회차표를 자동 생성합니다. "
                 "필요하면 날짜/시작 시간/소요 시간을 직접 수정하거나 행을 추가·삭제할 수 있습니다."
             )
+            st.caption(
+                "현재 접속 중 임시 저장한 시간 템플릿은 삼성 취합과 위클리 취합에서 공통으로 사용됩니다."
+            )
             try:
-                if "slot_templates" not in st.session_state:
-                    st.session_state["slot_templates"] = {}
-
                 slot_rows = default_slot_rows(job_type, weekly_type, uploaded_files)
                 if slot_rows:
                     template_key_parts = ["default"]
-                    saved_templates: dict[str, list[dict[str, object]]] = st.session_state["slot_templates"]
+                    saved_templates = get_global_slot_templates()
                     if saved_templates:
                         selected_template = st.selectbox(
-                            "저장된 시간 템플릿 불러오기",
+                            "공용 시간 템플릿 불러오기",
                             ["자동 생성값 사용"] + sorted(saved_templates),
-                            key=f"template_select_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                            key=GLOBAL_SLOT_TEMPLATE_SELECTION_KEY,
                         )
                         if selected_template != "자동 생성값 사용":
                             slot_rows = template_sessions_to_slot_rows(saved_templates[selected_template], uploaded_files)
@@ -560,11 +573,15 @@ def main() -> None:
                     save_col, download_col = st.columns(2)
                     with save_col:
                         if st.button(
-                            "현재 시간표 임시 저장",
+                            "현재 시간표 공용 임시 저장",
                             key=f"slot_template_save_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
                         ):
-                            st.session_state["slot_templates"][template_name.strip() or "시간 템플릿"] = normalize_template_sessions(edited_slots)
-                            st.success("현재 접속 중 사용할 수 있는 시간 템플릿으로 저장했습니다.")
+                            saved_name = template_name.strip() or "시간 템플릿"
+                            get_global_slot_templates()[saved_name] = normalize_template_sessions(edited_slots)
+                            st.success(
+                                f"`{saved_name}`을(를) 현재 접속 공용 시간 템플릿으로 저장했습니다. "
+                                "삼성 취합과 위클리 취합에서 불러올 수 있습니다."
+                            )
                     with download_col:
                         st.download_button(
                             "현재 시간표 JSON 다운로드",

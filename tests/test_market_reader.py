@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from services.excel_reader import canonicalize_columns
 
@@ -77,3 +78,25 @@ def test_11st_modified_columns_are_canonicalized() -> None:
     assert result.loc[0, "상품주문번호"] == "11-1-1"
     assert result.loc[0, "옵션관리코드"] == "SM-L340NZEAKOO"
     assert "원본 구분 열 없음" in result.loc[0, "쇼핑라이브 판정근거"]
+
+
+@pytest.mark.parametrize(
+    "date_header",
+    ["결제일시", "예약결제완료일시", "주문일시", "결제일"],
+)
+def test_payment_date_aliases_and_product_name_sku_are_recognized(date_header: str) -> None:
+    raw = pd.DataFrame(
+        [
+            {
+                "주문번호": "ORDER-1",
+                date_header: "2026.07.30",
+                "상품명": "삼성전자 갤럭시 워치9 블루투스 44mm SM-L350N 리뷰신세계2만+강화유리2매",
+                "수량": 1,
+                "판매금액": 350_000,
+            }
+        ]
+    )
+    result = canonicalize_columns(raw, "주문 raw.xlsx")
+    assert "결제일시" in result
+    assert pd.to_datetime(result.loc[0, "결제일시"], errors="coerce") == pd.Timestamp("2026-07-30")
+    assert result.loc[0, "옵션관리코드"] == "SM-L350N"

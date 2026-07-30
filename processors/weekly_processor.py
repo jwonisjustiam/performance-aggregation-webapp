@@ -8,10 +8,11 @@ import re
 import pandas as pd
 
 from services.amount_resolver import resolve_amount, to_millions
+from services.sku_resolver import extract_sku_code, normalize_sku, sku_matches_any
 from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
 
-REQUIRED = ("주문번호", "결제일시", "상품명", "주문 유입경로")
+REQUIRED = ("주문번호", "결제일시", "상품명")
 DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
 RESULT_KEYS = ("final", "summary", "excluded", "duplicates", "errors", "extra_details")
 CustomSlots = dict[date, tuple[object, ...]]
@@ -166,8 +167,11 @@ def infer_target_dates(file_name: str) -> list[date] | None:
 
 
 def _is_live(row: pd.Series) -> bool:
-    if str(row.get("주문 유입경로", "")).strip() == "쇼핑라이브":
+    value = row.get("주문 유입경로")
+    if value is not None and not pd.isna(value) and str(value).strip() == "쇼핑라이브":
         return True
+    if value is None or pd.isna(value) or not str(value).strip():
+        return "원본 구분 열 없음" in str(row.get("쇼핑라이브 판정근거", ""))
     values = list(row.values)
     return any(str(value).strip() == "0" and index + 1 < len(values) and str(values[index + 1]).strip() == "쇼핑라이브" for index, value in enumerate(values))
 
@@ -175,17 +179,23 @@ def _is_live(row: pd.Series) -> bool:
 def _selected_option_code(row: pd.Series) -> str:
     option_code = str(row.get("옵션관리코드", "") or "").strip()
     seller_code = str(row.get("판매자 상품코드", "") or "").strip()
-    return option_code or seller_code
+    return (
+        extract_sku_code(option_code)
+        or extract_sku_code(seller_code)
+        or extract_sku_code(row.get("상품명", ""))
+        or option_code
+        or seller_code
+    )
 
 
 def _normalize_sku(value: object) -> str:
-    return re.sub(r"\s+", "", str(value or "")).upper()
+    return normalize_sku(value)
 
 
 def _matches_optional_sku_filter(row: pd.Series, allowed_skus: set[str] | None) -> bool:
     if not allowed_skus:
         return True
-    return _normalize_sku(_selected_option_code(row)) in allowed_skus
+    return sku_matches_any(_selected_option_code(row), allowed_skus)
 
 
 def _prepare_weekly_source(
@@ -206,6 +216,8 @@ def _prepare_weekly_source(
     duplicates = source.loc[duplicate_mask].copy()
     source = source.loc[~duplicate_mask].copy()
     source["_row"] = range(len(source))
+    source["_platform"] = source.get("원본몰", pd.Series("네이버", index=source.index)).fillna("미확인").astype(str)
+    source["_order_key"] = source["_platform"] + "::" + source["주문번호"].fillna("").astype(str)
     source["_payment"] = pd.to_datetime(source["결제일시"], errors="coerce")
     source["_live"] = source.apply(_is_live, axis=1)
     source["_sku_filter_ok"] = source.apply(lambda row: _matches_optional_sku_filter(row, allowed_skus), axis=1)
@@ -214,10 +226,10 @@ def _prepare_weekly_source(
     source["_amount_basis"] = [item[1] for item in resolved]
     if "상품주문번호" in source:
         product_duplicate_mask = source["상품주문번호"].notna() & source["상품주문번호"].astype(str).str.strip().ne("") & source.duplicated(
-            subset=["상품주문번호"], keep="first"
+            subset=["_platform", "상품주문번호"], keep="first"
         )
     else:
-        duplicate_basis = [column for column in ["주문번호", "결제일시", "상품명", "옵션 정보", "_amount"] if column in source]
+        duplicate_basis = [column for column in ["_platform", "주문번호", "결제일시", "상품명", "옵션 정보", "_amount"] if column in source]
         product_duplicate_mask = source.duplicated(subset=duplicate_basis, keep="first")
     if product_duplicate_mask.any():
         duplicates = pd.concat([duplicates, source.loc[product_duplicate_mask].copy()], ignore_index=True)
@@ -277,7 +289,7 @@ def process_weekly(
                     "날짜": broadcast_date,
                     "시간": slot.start.strftime("%H:%M"),
                     "duration (분)": _slot_duration_minutes(slot),
-                    "수량": int(part["주문번호"].nunique()),
+                    "수량": int(part["_order_key"].nunique()),
                     "전환율": 0,
                     "금액(백만)": to_millions(part["_amount"].sum()),
                 }
@@ -310,8 +322,12 @@ def process_detail(
     source["_sku"] = source["_selected_option_code"].map(_normalize_sku)
     active_wearable_skus = {_normalize_sku(value) for value in (wearable_skus or WEARABLE_SKUS) if _normalize_sku(value)}
     active_mobile_acc_skus = {_normalize_sku(value) for value in (mobile_acc_skus or MOBILE_ACC_SKUS) if _normalize_sku(value)}
-    source["_wearable_match"] = source["_sku"].isin(active_wearable_skus)
-    source["_mobile_acc_match"] = source["_sku"].isin(active_mobile_acc_skus)
+    source["_wearable_match"] = source["_sku"].map(
+        lambda value: sku_matches_any(value, active_wearable_skus)
+    )
+    source["_mobile_acc_match"] = source["_sku"].map(
+        lambda value: sku_matches_any(value, active_mobile_acc_skus)
+    )
 
     def build_category_frame(category_name: str, mask: pd.Series) -> pd.DataFrame:
         detail = source.loc[mask].copy()

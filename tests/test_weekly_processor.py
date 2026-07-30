@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from processors.weekly_processor import infer_target_dates, infer_weekly_kind, process_detail, process_weekly
+from services.excel_reader import canonicalize_columns
 
 
 def test_unique_order_count_and_multiple_line_amount(weekly_frame: pd.DataFrame) -> None:
@@ -117,3 +118,43 @@ def test_detail_watch9_presale_splits_wearable_and_mobile_acc_without_live_time_
     assert set(result["mobile_acc"]["주문번호"]) == {"B"}
     assert set(result["excluded"]["주문번호"]) == {"C"}
     assert final.loc[final["주문번호"] == "A", "옵션 관리 코드"].iloc[0] == "SM-L340NZEAKOO"
+
+
+def test_detail_uses_date_alias_and_short_sku_from_product_name() -> None:
+    raw = pd.DataFrame(
+        [
+            {
+                "주문번호": "A",
+                "주문일시": "2026.07.30",
+                "상품명": "삼성전자 갤럭시 워치9 블루투스 44mm SM-L350N 리뷰신세계2만+강화유리2매",
+                "수량": 1,
+                "판매금액": 350_000,
+            }
+        ]
+    )
+    frame = canonicalize_columns(raw, "주문 raw.xlsx")
+    result = process_detail(frame, "주문 raw.xlsx")
+    assert set(result["wearable"]["주문번호"]) == {"A"}
+    assert result["wearable"].loc[0, "옵션 관리 코드"] == "SM-L350N"
+
+
+def test_weekly_optional_sku_filter_uses_product_name_code() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "주문번호": "W1",
+                "결제일시": "2026-07-23 01:20",
+                "상품명": "갤럭시 워치9 44mm SM-L350N 사은품",
+                "상품가격": 350_000,
+                "옵션가격": 0,
+                "주문 유입경로": "쇼핑라이브",
+            }
+        ]
+    )
+    result = process_weekly(
+        frame,
+        "웨어러블 20260723.xlsx",
+        "wearable",
+        allowed_skus={"SM-L350NZKAKOO"},
+    )
+    assert result["final"]["수량"].sum() == 1

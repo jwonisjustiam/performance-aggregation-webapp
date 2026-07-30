@@ -17,10 +17,10 @@ def test_xlsx_names(tmp_path: Path, name: str) -> None:
     assert "결제일시" in result.data
 
 
-def test_xls_rejected(tmp_path: Path) -> None:
+def test_unsupported_extension_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="xlsx"):
-        read_xlsx(tmp_path / "old.xls")
-    assert ".xlsx" in XLS_ERROR
+        read_xlsx(tmp_path / "old.csv")
+    assert ".xls" in XLS_ERROR
 
 
 def test_password_policy_is_strict() -> None:
@@ -29,4 +29,3 @@ def test_password_policy_is_strict() -> None:
 
 def test_missing_required_column() -> None:
     assert missing_columns(pd.DataFrame({"주문번호": []}), ["주문번호", "결제일시"]) == ["결제일시"]
-

@@ -11,10 +11,11 @@ from processors.weekly_processor import infer_target_dates
 from rules.samsung_rules import DEFAULT_BROADCAST_VALUES
 from services.amount_resolver import resolve_amount
 from services.result_formatter import shorten_model
+from services.sku_resolver import extract_sku_code
 from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
 
-REQUIRED = ("주문번호", "결제일시", "상품명", "수량", "상품가격", "옵션가격", "주문 유입경로")
+REQUIRED = ("주문번호", "결제일시", "상품명", "수량")
 DEFAULT_MODEL_PREFIXES = ("SM-",)
 CustomSlots = dict[date, tuple[object, ...]]
 
@@ -31,11 +32,26 @@ def _slot_duration_minutes(slot: object) -> int:
 def _select_model_code(row: pd.Series) -> str:
     option_code = str(row.get("옵션관리코드", "") or "").strip().upper()
     seller_code = str(row.get("판매자 상품코드", "") or "").strip().upper()
-    if option_code.startswith("SM"):
-        return option_code
-    if seller_code.startswith("SM"):
-        return seller_code
-    return option_code or seller_code
+    product_code = extract_sku_code(row.get("상품명", ""))
+    for candidate in (extract_sku_code(option_code), extract_sku_code(seller_code), product_code):
+        if candidate.startswith("SM-"):
+            return candidate
+    return option_code or seller_code or product_code
+
+
+def _is_live(row: pd.Series) -> bool:
+    value = row.get("주문 유입경로")
+    if value is not None and not pd.isna(value) and str(value).strip():
+        if str(value).strip() == "쇼핑라이브":
+            return True
+        values = list(row.values)
+        return any(
+            str(item).strip() == "0"
+            and index + 1 < len(values)
+            and str(values[index + 1]).strip() == "쇼핑라이브"
+            for index, item in enumerate(values)
+        )
+    return "원본 구분 열 없음" in str(row.get("쇼핑라이브 판정근거", ""))
 
 
 def _target_date(source: pd.DataFrame) -> date:
@@ -57,20 +73,20 @@ def process_samsung(
     missing = missing_columns(raw_df, REQUIRED)
     if missing:
         raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
-    if not any(column in raw_df for column in ("옵션관리코드", "판매자 상품코드")):
-        raise ValueError("옵션관리코드 또는 판매자 상품코드 열이 필요합니다.")
     source = raw_df.copy()
     source["_source_row"] = range(len(source))
     exact_duplicates = source.duplicated(keep="first")
     source = source.loc[~exact_duplicates].copy()
     source["_payment"] = pd.to_datetime(source["결제일시"], errors="coerce")
+    source["_platform"] = source.get("원본몰", pd.Series("네이버", index=source.index)).fillna("미확인").astype(str)
+    source["_order_key"] = source["_platform"] + "::" + source["주문번호"].fillna("").astype(str)
     source["_code"] = source.apply(_select_model_code, axis=1)
     source["_model"] = source["_code"].map(shorten_model)
     active_prefixes = tuple(prefix.strip().upper() for prefix in (model_prefixes or DEFAULT_MODEL_PREFIXES) if prefix.strip())
     if not active_prefixes:
         active_prefixes = DEFAULT_MODEL_PREFIXES
     source["_target_model"] = source["_model"].str.startswith(active_prefixes)
-    source["_live"] = source["주문 유입경로"].astype(str).str.strip().eq("쇼핑라이브")
+    source["_live"] = source.apply(_is_live, axis=1)
     amounts = source.apply(resolve_amount, axis=1)
     source["_amount"] = [item[0] for item in amounts]
     target_dates = infer_target_dates(file_name)
@@ -96,7 +112,9 @@ def process_samsung(
 
     verification_rows: list[dict[str, object]] = []
     representative_rows: list[pd.Series] = []
-    for order_number, group in source.groupby("주문번호", dropna=False, sort=False):
+    for _, group in source.groupby("_order_key", dropna=False, sort=False):
+        order_number = group["주문번호"].iloc[0]
+        platform = group["_platform"].iloc[0]
         valid = group.loc[eligible.loc[group.index]].drop_duplicates(subset=["_model", "상품명", "_amount"], keep="first")
         reason = "정상"
         if valid.empty:
@@ -109,7 +127,7 @@ def process_samsung(
             elif not group["_date_ok"].any():
                 reason = "회차 범위 밖—제외"
             else:
-                reason = "옵션관리코드 없음—제외"
+                reason = "옵션관리코드·판매자 상품코드·상품명 코드 없음—제외"
             representative = None
         else:
             representative = valid.sort_values(["_amount", "_source_row"], ascending=[False, True], kind="stable").iloc[0].copy()
@@ -121,6 +139,7 @@ def process_samsung(
                 reason = "동일 상품 중복 행 제거"
         verification_rows.append(
             {
+                "원본몰": platform,
                 "주문번호": order_number,
                 "결제일시": group["_payment"].min(),
                 "쇼핑라이브 SM 원본 행 수": int((group["_live"] & group["_target_model"]).sum()),
@@ -140,12 +159,13 @@ def process_samsung(
                 part = representatives[(representatives["_broadcast_date"] == target) & (representatives["_slot"] == slot.label)]
             else:
                 part = representatives
-            counts = part.groupby("_model")["주문번호"].nunique().to_dict() if not part.empty else {}
-            models = sorted(counts, key=lambda model: (model != "SM-R390", model)) or [""]
+            counts = part.groupby(["_platform", "_model"])["_order_key"].nunique().to_dict() if not part.empty else {}
+            platform_models = sorted(counts, key=lambda item: (item[1] != "SM-R390", item[0], item[1])) or [("네이버", "")]
             duration = _slot_duration_minutes(slot)
             production_owner = "" if duration in {60, 90} else DEFAULT_BROADCAST_VALUES.get("제작 주체", "")
-            for model in models:
+            for platform, model in platform_models:
                 row_defaults = dict(DEFAULT_BROADCAST_VALUES)
+                row_defaults["플랫폼"] = platform
                 row_defaults["제작 주체"] = production_owner
                 row_defaults["DURATION (분)"] = duration
                 integrated.append(
@@ -156,7 +176,7 @@ def process_samsung(
                         **row_defaults,
                         "시간": slot.start.strftime("%H:%M"),
                         "모델": model,
-                        "실적(대)": int(counts.get(model, 0)),
+                        "실적(대)": int(counts.get((platform, model), 0)),
                     }
                 )
             summary_rows.append(
@@ -165,7 +185,7 @@ def process_samsung(
                     "일": target.day,
                     "요일": "월화수목금토일"[target.weekday()],
                     "시간": slot.label,
-                    "총 주문수": "" if part.empty else int(part["주문번호"].nunique()),
+                    "총 주문수": "" if part.empty else int(part["_order_key"].nunique()),
                     "총 금액": "" if part.empty else float(part["_order_amount"].sum()),
                 }
             )

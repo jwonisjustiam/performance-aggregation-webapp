@@ -14,7 +14,7 @@ import streamlit as st
 
 from processors import process_detail, process_samsung, process_weekly
 from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_target_dates, infer_weekly_kind
-from services.excel_reader import XLS_ERROR, read_xlsx
+from services.excel_reader import XLS_ERROR, read_workbook
 from services.excel_writer import create_result_workbook
 from services.time_slotter import slots_for_date
 from services.validator import input_diagnostics
@@ -32,19 +32,19 @@ JOB_TYPE_OPTIONS = {
         "code": "samsung",
         "title": "삼성 취합",
         "caption": "삼성 쇼핑라이브 Raw Data를 업로드해 통합 실적표, 회차별 합계, 중복 주문 검증 파일을 생성합니다.",
-        "upload_label": "삼성 주문 Raw Data .xlsx 파일",
+        "upload_label": "삼성 주문 Raw Data .xlsx/.xls 파일",
     },
     "위클리 취합": {
         "code": "weekly",
         "title": "위클리 취합",
         "caption": "외장하드 또는 웨어러블 Raw Data를 업로드해 회차별 수량과 금액을 집계합니다.",
-        "upload_label": "위클리 주문 Raw Data .xlsx 파일",
+        "upload_label": "위클리 주문 Raw Data .xlsx/.xls 파일",
     },
     "워치9 사전판매 판매 실적 취합": {
         "code": "detail",
         "title": "워치9 사전판매 판매 실적 취합",
         "caption": "Raw Data 전체에서 옵션 관리 코드 또는 판매자 상품 코드 기준으로 웨어러블/모바일 ACC 판매 실적 상세 목록을 생성합니다.",
-        "upload_label": "워치9 사전판매 Raw Data .xlsx 파일",
+        "upload_label": "워치9 사전판매 Raw Data .xlsx/.xls 파일",
     },
 }
 
@@ -318,21 +318,19 @@ def uploaded_file_to_path(uploaded_file: object, target: Path) -> int:
 
 def read_uploaded_workbooks(uploaded_files: list[object], temp_dir: Path) -> tuple[pd.DataFrame, str, list[dict[str, object]]]:
     if not uploaded_files:
-        raise ValueError("주문 Raw Data .xlsx 파일을 한 개 이상 업로드해주세요.")
+        raise ValueError("주문 Raw Data .xlsx 또는 .xls 파일을 한 개 이상 업로드해주세요.")
 
     workbooks = []
     file_info: list[dict[str, object]] = []
     for index, uploaded_file in enumerate(uploaded_files):
         name = Path(uploaded_file.name or f"upload_{index}").name
         suffix = Path(name).suffix.lower()
-        if suffix == ".xls":
+        if suffix not in {".xlsx", ".xls"}:
             raise ValueError(f"{name}: {XLS_ERROR}")
-        if suffix != ".xlsx":
-            raise ValueError(f"{name}: .xlsx 파일만 지원합니다.")
 
         path = temp_dir / f"{index:03d}_{name}"
         size = uploaded_file_to_path(uploaded_file, path)
-        workbook = read_xlsx(path)
+        workbook = read_workbook(path)
         workbooks.append(workbook)
 
         payment = pd.to_datetime(workbook.data.get("결제일시"), errors="coerce") if "결제일시" in workbook.data else pd.Series(dtype="datetime64[ns]")
@@ -345,6 +343,7 @@ def read_uploaded_workbooks(uploaded_files: list[object], temp_dir: Path) -> tup
                 "행 수": len(workbook.data),
                 "열 수": len(workbook.data.columns),
                 "암호화": "예" if workbook.encrypted else "아니오",
+                "감지 쇼핑몰": ", ".join(sorted(set(workbook.data.get("원본몰", pd.Series(dtype=str)).dropna().astype(str)))),
                 "헤더 행": workbook.header_row,
                 "최소 결제일": payment.min() if len(payment.dropna()) else None,
                 "최대 결제일": payment.max() if len(payment.dropna()) else None,
@@ -385,7 +384,7 @@ def analyze_frame(
     rule_settings: dict[str, object] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], bytes, str, dict[str, object], list[dict[str, object]], dict[str, object], dict[str, object], int | None]:
     payment_dates = pd.to_datetime(frame.get("결제일시"), errors="coerce") if "결제일시" in frame else pd.Series(dtype="datetime64[ns]")
-    diagnostics = input_diagnostics(frame, ["주문번호", "결제일시", "상품명", "주문 유입경로"])
+    diagnostics = input_diagnostics(frame, ["주문번호", "결제일시", "상품명"])
     common_orders = None
 
     if job_type == "weekly":
@@ -440,9 +439,13 @@ def render_usage_guide() -> None:
             3. 삼성 취합은 `삼성 모델/SKU 시작값`을 화면에서 수정할 수 있습니다. 기본값은 `SM-`입니다.
             4. 위클리 취합은 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
             5. 위클리 취합은 `위클리 포함 SKU 목록`을 비워두면 기존처럼 전체 쇼핑라이브 주문을 취합하고, 값을 입력하면 해당 SKU만 취합합니다.
-            6. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 옵션 관리 코드 또는 판매자 상품 코드의 SKU 목록으로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
+            6. 워치9 사전판매 판매 실적 취합은 라이브 시간/회차 규칙 없이 옵션 관리 코드, 판매자 상품 코드 또는 상품명 속 SKU로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
             7. 워치9 사전판매 판매 실적 취합에서는 화면의 SKU 목록을 직접 수정한 뒤 분석할 수 있습니다.
-            8. 업로드 파일은 `.xlsx`만 지원합니다. `.xls` 파일은 엑셀에서 `.xlsx`로 저장한 뒤 올려주세요.
+            8. 네이버, 11번가, 지마켓, 옥션, 카카오의 `.xlsx`/`.xls` Raw Data를 지원합니다.
+            9. 암호 파일은 `0000`, `1234`를 자동으로 시도합니다.
+            10. 쇼핑라이브 구분 열이 없는 파일은 업로드된 행 전체를 후보로 사용하므로, 원본 전체를 올릴 때는 SKU/날짜/회차 조건을 확인하세요.
+            11. 날짜 열은 `결제일시`, `예약결제완료일시`, `주문일시`, `결제일`을 인식하며 `YYYY.MM.DD` 형식도 처리합니다.
+            12. 옵션 코드 열이 없거나 비어 있으면 상품명에서 `SM-L350N` 같은 SKU를 자동으로 찾습니다.
             """
         )
 
@@ -498,13 +501,13 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-07-29 공용 시간표 템플릿")
+    st.caption("배포 버전: 2026-07-30 날짜 별칭·상품명 SKU 자동 인식")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
     uploaded_files = st.file_uploader(
         selected_job["upload_label"],
-        type=["xlsx"],
+        type=["xlsx", "xls"],
         accept_multiple_files=True,
         key=f"raw_files_{job_type}",
     )
@@ -622,6 +625,11 @@ def show_result(
 ) -> None:
     st.success("분석과 저장 후 재검증을 완료했습니다.")
     render_summary_cards(summary, result)
+    if int(diagnostics.get("live_assumed_rows", 0) or 0):
+        st.warning(
+            f"쇼핑라이브 구분 열이 없는 {int(diagnostics['live_assumed_rows']):,}개 행은 업로드 행 전체를 대상 후보로 사용했습니다. "
+            "원본 전체 파일이라면 SKU·날짜·회차 조건을 반드시 확인하세요."
+        )
     if job_type == "detail":
         download_columns = st.columns(2)
         wearable_content, wearable_validation = create_single_sheet_workbook("웨어러블", result.get("wearable", pd.DataFrame()))

@@ -31,6 +31,11 @@ def input_diagnostics(df: pd.DataFrame, required: Iterable[str]) -> dict[str, in
         for _, row in df.iterrows()
         for index, value in enumerate(row)
     )
+    no_live_marker_rows = (
+        int(df["쇼핑라이브 판정근거"].astype(str).str.contains("원본 구분 열 없음", na=False).sum())
+        if "쇼핑라이브 판정근거" in df
+        else 0
+    )
     return {
         "missing_columns": missing,
         "date_errors": int(dates.isna().sum()) if len(dates) else 0,
@@ -39,7 +44,8 @@ def input_diagnostics(df: pd.DataFrame, required: Iterable[str]) -> dict[str, in
         "duplicate_orders": duplicate_orders,
         "required_empty": required_empty,
         "shifted_columns_detected": shifted_live,
-        "live_source_decidable": "주문 유입경로" in df.columns or shifted_live,
+        "live_source_decidable": no_live_marker_rows == 0 and ("주문 유입경로" in df.columns or shifted_live),
+        "live_assumed_rows": no_live_marker_rows,
     }
 
 

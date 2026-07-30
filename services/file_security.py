@@ -36,7 +36,7 @@ def readable_workbook(path: Path) -> Iterator[tuple[Path, bool]]:
                 with path.open("rb") as source:
                     office = msoffcrypto.OfficeFile(source)
                     office.load_key(password=password)
-                    handle = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+                    handle = tempfile.NamedTemporaryFile(suffix=path.suffix.lower(), delete=False)
                     decrypted_path = Path(handle.name)
                     try:
                         office.decrypt(handle)

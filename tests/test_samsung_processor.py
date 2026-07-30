@@ -61,3 +61,21 @@ def test_samsung_period_file_outputs_all_target_dates_and_excludes_after_last_mi
     assert sum(value for value in summary["총 주문수"] if value != "") == 4
     excluded = result["duplicates"].query("주문번호 == 'S5'").iloc[0]
     assert "회차 범위 밖" in excluded["처리 기준"]
+
+
+def test_samsung_uses_sm_code_from_product_name_without_code_columns() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "주문번호": "S1",
+                "결제일시": "2026-07-23 01:20",
+                "상품명": "삼성전자 갤럭시 워치9 블루투스 44mm SM-L350N 리뷰신세계2만+강화유리2매",
+                "수량": 1,
+                "상품가격": 350_000,
+                "옵션가격": 0,
+                "주문 유입경로": "쇼핑라이브",
+            }
+        ]
+    )
+    result = process_samsung(frame, "웨어러블 20260723.xlsx")
+    assert set(result["final"]["모델"]) - {""} == {"SM-L350"}

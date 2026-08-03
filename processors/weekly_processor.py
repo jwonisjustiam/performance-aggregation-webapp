@@ -210,7 +210,7 @@ def _prepare_weekly_source(
     if missing:
         raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
     kind = infer_weekly_kind(file_name, selected_type)
-    target_dates = infer_target_dates(file_name)
+    target_dates = sorted(custom_slots) if custom_slots is not None else infer_target_dates(file_name)
     source = raw_df.copy()
     duplicate_mask = source.duplicated(keep="first")
     duplicates = source.loc[duplicate_mask].copy()
@@ -235,14 +235,14 @@ def _prepare_weekly_source(
         duplicates = pd.concat([duplicates, source.loc[product_duplicate_mask].copy()], ignore_index=True)
         source = source.loc[~product_duplicate_mask].copy()
     source["_broadcast_date"] = source["_payment"].map(inferred_broadcast_date)
-    if custom_slots:
+    if custom_slots is not None:
         assignments = source.apply(lambda row: assign_slot(row["_payment"], kind, custom_slots=custom_slots), axis=1)
     else:
         assignments = source.apply(
             lambda row: assign_slot(row["_payment"], kind, row["_broadcast_date"]) if row["_broadcast_date"] else None,
             axis=1,
         )
-    if custom_slots:
+    if custom_slots is not None:
         source["_broadcast_date"] = [item[0] if item else None for item in assignments]
     source["_slot"] = [item[1] if item else None for item in assignments]
     source["_disabled_slot"] = source.apply(
@@ -257,7 +257,7 @@ def _prepare_weekly_source(
         | ~source["_live"]
         | ~source["_sku_filter_ok"]
         | source["_slot"].isna()
-        | (False if custom_slots else source["_disabled_slot"])
+        | (False if custom_slots is not None else source["_disabled_slot"])
         | ~source["_target_date_ok"]
         | source["_amount"].isna()
     )

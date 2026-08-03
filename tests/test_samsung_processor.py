@@ -1,6 +1,9 @@
+from datetime import date, time
+
 import pandas as pd
 
 from processors.samsung_processor import process_samsung
+from rules.weekly_rules import SlotRule
 
 
 def test_only_sm_and_model_shortening(samsung_frame: pd.DataFrame) -> None:
@@ -42,6 +45,25 @@ def test_samsung_uses_wearable_date_override_slots() -> None:
     result = process_samsung(frame)
     assert "11:40" not in set(result["final"]["시간"])
     assert {"13:00", "20:00", "20:20"}.issubset(set(result["final"]["시간"]))
+
+
+def test_samsung_manual_slots_override_naver_download_timestamp_in_file_name() -> None:
+    frame = pd.DataFrame(
+        [["S1", "2026-07-31 20:09", "워치", 1, "SM-R390NZSAKOO", "", 200_000, 0, "쇼핑라이브"]],
+        columns=["주문번호", "결제일시", "상품명", "수량", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
+    )
+    custom_slots = {
+        date(2026, 7, 31): (SlotRule("20:00", time(20, 0), time(21, 0)),),
+    }
+
+    result = process_samsung(
+        frame,
+        "스마트스토어_전체주문발주발송관리_20260803_0921.xlsx",
+        custom_slots=custom_slots,
+    )
+
+    assert set(zip(result["final"]["월"], result["final"]["일"])) == {(7, 31)}
+    assert result["final"]["실적(대)"].sum() == 1
 
 
 def test_samsung_period_file_outputs_all_target_dates_and_excludes_after_last_midnight_window() -> None:

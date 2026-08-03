@@ -89,17 +89,17 @@ def process_samsung(
     source["_live"] = source.apply(_is_live, axis=1)
     amounts = source.apply(resolve_amount, axis=1)
     source["_amount"] = [item[0] for item in amounts]
-    target_dates = infer_target_dates(file_name)
+    target_dates = sorted(custom_slots) if custom_slots is not None else infer_target_dates(file_name)
     fallback_target = _target_date(source)
     source["_broadcast_date"] = source["_payment"].map(inferred_broadcast_date)
-    if custom_slots:
+    if custom_slots is not None:
         assigned = source.apply(lambda row: assign_slot(row["_payment"], "wearable", custom_slots=custom_slots), axis=1)
     else:
         assigned = source.apply(
             lambda row: assign_slot(row["_payment"], "wearable", row["_broadcast_date"]) if row["_broadcast_date"] else None,
             axis=1,
         )
-    if custom_slots:
+    if custom_slots is not None:
         source["_broadcast_date"] = [item[0] if item else None for item in assigned]
     source["_slot"] = [item[1] if item else None for item in assigned]
     source["_target_date_ok"] = True if target_dates is None else source["_broadcast_date"].isin(target_dates)
@@ -107,7 +107,7 @@ def process_samsung(
         lambda row: session_is_disabled("wearable", row["_broadcast_date"], row["_slot"]) if row["_broadcast_date"] else False,
         axis=1,
     )
-    source["_date_ok"] = source["_slot"].notna() & source["_target_date_ok"] & (True if custom_slots else ~source["_disabled_slot"])
+    source["_date_ok"] = source["_slot"].notna() & source["_target_date_ok"] & (True if custom_slots is not None else ~source["_disabled_slot"])
     eligible = source["_live"] & source["_target_model"] & source["_date_ok"] & source["_amount"].notna()
 
     verification_rows: list[dict[str, object]] = []

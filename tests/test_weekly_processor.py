@@ -1,7 +1,10 @@
+from datetime import date, time
+
 import pandas as pd
 import pytest
 
 from processors.weekly_processor import infer_target_dates, infer_weekly_kind, process_detail, process_weekly
+from rules.weekly_rules import SlotRule
 from services.excel_reader import canonicalize_columns
 
 
@@ -51,6 +54,27 @@ def test_period_file_name_infers_all_target_broadcast_dates() -> None:
         pd.Timestamp("2026-07-25").date(),
         pd.Timestamp("2026-07-26").date(),
     ]
+
+
+def test_manual_slots_override_naver_download_timestamp_in_file_name() -> None:
+    frame = pd.DataFrame(
+        [["A", "2026-07-31 20:09", "상품A", 100_000, 0, "쇼핑라이브"]],
+        columns=["주문번호", "결제일시", "상품명", "상품가격", "옵션가격", "주문 유입경로"],
+    )
+    custom_slots = {
+        date(2026, 7, 31): (SlotRule("20:00", time(20, 0), time(21, 0)),),
+    }
+
+    result = process_weekly(
+        frame,
+        "스마트스토어_전체주문발주발송관리_20260803_0921.xlsx",
+        "external",
+        custom_slots=custom_slots,
+    )
+
+    assert set(result["final"]["날짜"]) == {date(2026, 7, 31)}
+    assert result["final"]["수량"].sum() == 1
+    assert result["excluded"].empty
 
 
 def test_period_file_outputs_all_target_dates_and_excludes_after_last_midnight_window() -> None:

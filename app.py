@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from processors import process_detail, process_samsung, process_weekly
-from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_target_dates, infer_weekly_kind
+from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_workbook
 from services.excel_writer import create_result_workbook
 from services.time_slotter import slots_for_date
@@ -99,9 +99,21 @@ def slot_duration_minutes(slot: SlotRule) -> int:
     return max(1, int((end - start).total_seconds() // 60))
 
 
-def infer_uploaded_dates(uploaded_files: list[object]) -> list[date]:
-    combined_names = " | ".join(Path(getattr(item, "name", "") or "").name for item in uploaded_files)
-    return infer_target_dates(combined_names) or []
+def expand_date_selection(value: object) -> list[date]:
+    """Expand a Streamlit date input value into an inclusive list of dates."""
+    if isinstance(value, date):
+        selected = [value]
+    elif isinstance(value, (tuple, list)):
+        selected = [item for item in value if isinstance(item, date)]
+    else:
+        selected = []
+    if not selected:
+        return []
+    start = selected[0]
+    end = selected[-1]
+    if end < start:
+        start, end = end, start
+    return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
 
 
 def uploaded_files_key(uploaded_files: list[object]) -> str:
@@ -109,8 +121,13 @@ def uploaded_files_key(uploaded_files: list[object]) -> str:
     return hashlib.sha1(names.encode("utf-8")).hexdigest()[:12]
 
 
-def default_slot_rows(job_type: str, weekly_type: str | None, uploaded_files: list[object]) -> list[dict[str, object]]:
-    target_dates = infer_uploaded_dates(uploaded_files)
+def default_slot_rows(
+    job_type: str,
+    weekly_type: str | None,
+    uploaded_files: list[object],
+    target_dates: list[date] | None = None,
+) -> list[dict[str, object]]:
+    target_dates = [] if target_dates is None else target_dates
     if not target_dates:
         return []
     combined_names = " | ".join(Path(getattr(item, "name", "") or "").name for item in uploaded_files)
@@ -160,8 +177,12 @@ def normalize_template_sessions(rows: pd.DataFrame | list[dict[str, object]]) ->
     return sessions
 
 
-def template_sessions_to_slot_rows(sessions: list[dict[str, object]], uploaded_files: list[object]) -> list[dict[str, object]]:
-    target_dates = infer_uploaded_dates(uploaded_files)
+def template_sessions_to_slot_rows(
+    sessions: list[dict[str, object]],
+    uploaded_files: list[object],
+    target_dates: list[date] | None = None,
+) -> list[dict[str, object]]:
+    target_dates = [] if target_dates is None else target_dates
     rows: list[dict[str, object]] = []
     for target in target_dates:
         for session in sessions:
@@ -461,7 +482,11 @@ def main() -> None:
         weekly_type = None
         rule_settings: dict[str, object] = {}
         if job_type == "weekly":
-            weekly_label = st.selectbox("위클리 유형", ["자동 판정", "외장하드", "웨어러블"])
+            weekly_label = st.selectbox(
+                "위클리 유형",
+                ["외장하드", "웨어러블", "자동 판정"],
+                help="파일명을 자유롭게 사용하려면 외장하드 또는 웨어러블을 직접 선택하세요.",
+            )
             weekly_type = {"자동 판정": "auto", "외장하드": "external", "웨어러블": "wearable"}[weekly_label]
             st.subheader("위클리 분류 규칙")
             st.caption("비워두면 기존처럼 모든 쇼핑라이브 주문을 취합합니다. 특정 SKU만 취합하려면 옵션 관리 코드 또는 판매자 상품 코드를 입력하세요.")
@@ -501,7 +526,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-07-30 날짜 별칭·상품명 SKU 자동 인식")
+    st.caption("배포 버전: 2026-08-03 웹 날짜 범위 직접 선택")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -515,14 +540,22 @@ def main() -> None:
     if job_type in {"samsung", "weekly"} and uploaded_files:
         with st.expander("회차 시간 설정", expanded=True):
             st.caption(
-                "파일명에서 작업 대상 날짜를 읽어 날짜별 회차표를 자동 생성합니다. "
-                "필요하면 날짜/시작 시간/소요 시간을 직접 수정하거나 행을 추가·삭제할 수 있습니다."
+                "파일명의 다운로드 날짜·시간은 사용하지 않습니다. "
+                "아래에서 선택한 작업 대상 날짜만 기준으로 날짜별 회차표를 생성합니다."
             )
             st.caption(
                 "현재 접속 중 임시 저장한 시간 템플릿은 삼성 취합과 위클리 취합에서 공통으로 사용됩니다."
             )
             try:
-                slot_rows = default_slot_rows(job_type, weekly_type, uploaded_files)
+                selected_dates = st.date_input(
+                    "작업 대상 날짜 범위",
+                    value=(date.today(), date.today()),
+                    format="YYYY-MM-DD",
+                    help="시작일과 종료일을 선택하면 그 사이의 모든 날짜에 회차표가 생성됩니다.",
+                    key=f"target_date_range_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
+                )
+                target_dates = expand_date_selection(selected_dates)
+                slot_rows = default_slot_rows(job_type, weekly_type, uploaded_files, target_dates)
                 if slot_rows:
                     template_key_parts = ["default"]
                     saved_templates = get_global_slot_templates()
@@ -533,7 +566,9 @@ def main() -> None:
                             key=GLOBAL_SLOT_TEMPLATE_SELECTION_KEY,
                         )
                         if selected_template != "자동 생성값 사용":
-                            slot_rows = template_sessions_to_slot_rows(saved_templates[selected_template], uploaded_files)
+                            slot_rows = template_sessions_to_slot_rows(
+                                saved_templates[selected_template], uploaded_files, target_dates
+                            )
                             template_key_parts.append(selected_template)
 
                     uploaded_template = st.file_uploader(
@@ -543,7 +578,7 @@ def main() -> None:
                     )
                     if uploaded_template is not None:
                         imported_sessions = load_template_sessions(uploaded_template)
-                        slot_rows = template_sessions_to_slot_rows(imported_sessions, uploaded_files)
+                        slot_rows = template_sessions_to_slot_rows(imported_sessions, uploaded_files, target_dates)
                         template_key_parts.append(uploaded_template.name)
 
                     slot_frame = pd.DataFrame(slot_rows)
@@ -594,7 +629,7 @@ def main() -> None:
                             key=f"slot_template_download_{job_type}_{weekly_type}_{uploaded_files_key(uploaded_files)}",
                         )
                 else:
-                    st.info("파일명에서 작업 대상 날짜를 찾지 못했습니다. 예: `20260724~20260726` 형식이 있으면 회차표를 자동 생성합니다.")
+                    st.info("시작일과 종료일을 모두 선택하면 회차표가 생성됩니다.")
             except Exception as exc:
                 st.warning(f"회차표를 만들 수 없습니다: {exc}")
 

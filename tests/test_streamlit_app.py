@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -8,6 +9,17 @@ from services.excel_writer import create_result_workbook
 
 
 ROOT = Path(__file__).parents[1]
+
+
+def test_manual_date_range_creates_slots_for_arbitrary_file_name() -> None:
+    from app import default_slot_rows, expand_date_selection
+
+    target_dates = expand_date_selection((date(2026, 7, 31), date(2026, 8, 2)))
+    uploaded_files = [type("Upload", (), {"name": "아무이름.xlsx"})()]
+    rows = default_slot_rows("weekly", "external", uploaded_files, target_dates)
+
+    assert target_dates == [date(2026, 7, 31), date(2026, 8, 1), date(2026, 8, 2)]
+    assert {row["날짜"] for row in rows} == {"2026-07-31", "2026-08-01", "2026-08-02"}
 
 
 def test_streamlit_entrypoint_and_docs() -> None:

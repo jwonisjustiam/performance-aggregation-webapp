@@ -410,8 +410,12 @@ def process_detail(
     basic = pd.concat([frame for frame in basic_parts if not frame.empty], ignore_index=True) if any(
         not frame.empty for frame in basic_parts
     ) else pd.DataFrame(columns=["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"])
-    wearable = build_category_frame("웨어러블", source["_wearable_match"] & source["_schedule_match"])
-    mobile_acc = build_category_frame("모바일 ACC", source["_mobile_acc_match"] & source["_schedule_match"])
+    wearable = build_category_frame("웨어러블", source["_wearable_match"] & source["_schedule_match"]).drop(
+        columns=["버전"]
+    )
+    mobile_acc = build_category_frame("모바일 ACC", source["_mobile_acc_match"] & source["_schedule_match"]).drop(
+        columns=["버전"]
+    )
     category_frames = [frame for frame in (basic, wearable, mobile_acc) if not frame.empty]
     if category_frames:
         final = pd.concat(category_frames, ignore_index=True, sort=False)

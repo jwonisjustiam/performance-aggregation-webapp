@@ -512,35 +512,6 @@ def main() -> None:
             )
             rule_settings["samsung_model_prefixes"] = parse_prefix_values(samsung_prefix_text)
         elif job_type == "detail":
-            st.subheader("일정·시간 필터")
-            detail_filter_enabled = st.checkbox(
-                "결제일시 필터 사용",
-                value=False,
-                help="선택하지 않으면 업로드한 전체 일정과 시간을 대상으로 합니다.",
-            )
-            if detail_filter_enabled:
-                detail_date_selection = st.date_input(
-                    "대상 날짜 범위",
-                    value=(date.today(), date.today()),
-                    key="detail_date_range",
-                )
-                detail_dates = expand_date_selection(detail_date_selection)
-                detail_time_columns = st.columns(2)
-                detail_start_time = detail_time_columns[0].time_input(
-                    "시작 시간",
-                    value=time(0, 0),
-                    key="detail_start_time",
-                )
-                detail_end_time = detail_time_columns[1].time_input(
-                    "종료 시간",
-                    value=time(23, 59, 59),
-                    key="detail_end_time",
-                )
-                if detail_dates:
-                    rule_settings["detail_date_range"] = (detail_dates[0], detail_dates[-1])
-                rule_settings["detail_time_range"] = (detail_start_time, detail_end_time)
-                if detail_start_time > detail_end_time:
-                    st.caption("종료 시간이 시작 시간보다 이르면 자정을 넘기는 시간대로 적용됩니다.")
             st.subheader("워치9 분류 규칙")
             st.caption(
                 "Basic 고정 분류: "
@@ -574,6 +545,41 @@ def main() -> None:
         accept_multiple_files=True,
         key=f"raw_files_{job_type}",
     )
+
+    if job_type == "detail":
+        with st.expander("입력 SKU 일정·시간 필터", expanded=True):
+            detail_filter_enabled = st.checkbox(
+                "결제일시 필터 사용",
+                value=False,
+                help="선택하지 않으면 업로드한 전체 일정과 시간을 대상으로 합니다.",
+                key="detail_filter_enabled",
+            )
+            if detail_filter_enabled:
+                detail_date_selection = st.date_input(
+                    "대상 날짜 범위",
+                    value=(date.today(), date.today()),
+                    format="YYYY-MM-DD",
+                    key="detail_date_range",
+                )
+                detail_dates = expand_date_selection(detail_date_selection)
+                detail_time_columns = st.columns(2)
+                detail_start_time = detail_time_columns[0].time_input(
+                    "시작 시간",
+                    value=time(0, 0),
+                    key="detail_start_time",
+                )
+                detail_end_time = detail_time_columns[1].time_input(
+                    "종료 시간",
+                    value=time(23, 59, 59),
+                    key="detail_end_time",
+                )
+                if detail_dates:
+                    rule_settings["detail_date_range"] = (detail_dates[0], detail_dates[-1])
+                rule_settings["detail_time_range"] = (detail_start_time, detail_end_time)
+                if detail_start_time > detail_end_time:
+                    st.caption("종료 시간이 시작 시간보다 이르면 자정을 넘기는 시간대로 적용됩니다.")
+            else:
+                st.caption("필터를 사용하지 않아 업로드한 전체 일정과 시간을 대상으로 합니다.")
 
     if job_type in {"samsung", "weekly"} and uploaded_files:
         with st.expander("회차 시간 설정", expanded=True):
@@ -704,36 +710,34 @@ def show_result(
             "원본 전체 파일이라면 SKU·날짜·회차 조건을 반드시 확인하세요."
         )
     if job_type == "detail":
-        download_columns = st.columns(3)
-        basic_content, basic_validation = create_single_sheet_workbook("Basic", result.get("basic", pd.DataFrame()))
-        wearable_content, wearable_validation = create_single_sheet_workbook("웨어러블", result.get("wearable", pd.DataFrame()))
-        mobile_acc_content, mobile_acc_validation = create_single_sheet_workbook("모바일 ACC", result.get("mobile_acc", pd.DataFrame()))
-        download_columns[0].download_button(
-            "Basic 결과 엑셀 다운로드",
-            data=basic_content,
-            file_name=build_category_download_filename("Basic", result.get("basic", pd.DataFrame())),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-        )
-        download_columns[1].download_button(
-            "웨어러블 결과 엑셀 다운로드",
-            data=wearable_content,
-            file_name=build_category_download_filename("웨어러블", result.get("wearable", pd.DataFrame())),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        download_columns[2].download_button(
-            "모바일 ACC 결과 엑셀 다운로드",
-            data=mobile_acc_content,
-            file_name=build_category_download_filename("모바일 ACC", result.get("mobile_acc", pd.DataFrame())),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        category_specs = [
+            ("Basic 결과", "Basic", "basic", "워치9 40mm·44mm와 울트라2만 모델별로 정리한 결과입니다."),
+            ("웨어러블 결과", "웨어러블", "wearable", "버전 구분 없이 웨어러블 품목만 정리한 결과입니다."),
+            ("모바일 ACC 결과", "모바일 ACC", "mobile_acc", "모바일 ACC 품목만 정리한 결과입니다."),
+        ]
+        category_tabs = st.tabs([item[0] for item in category_specs])
+        category_validations: dict[str, dict[str, object]] = {}
+        for tab, (tab_label, sheet_name, result_key, description) in zip(category_tabs, category_specs):
+            with tab:
+                frame = result.get(result_key, pd.DataFrame())
+                st.caption(description)
+                category_content, category_validation = create_single_sheet_workbook(sheet_name, frame)
+                category_validations[sheet_name] = category_validation
+                st.download_button(
+                    f"{tab_label} 엑셀 다운로드",
+                    data=category_content,
+                    file_name=build_category_download_filename(sheet_name, frame),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary" if result_key == "basic" else "secondary",
+                    key=f"detail_download_{result_key}",
+                )
+                if frame.empty:
+                    st.warning(f"{tab_label}에 해당하는 품목이 없습니다.")
+                else:
+                    st.dataframe(frame, use_container_width=True)
         validation = {
             **validation,
-            "분리파일검증": {
-                "Basic": basic_validation,
-                "웨어러블": wearable_validation,
-                "모바일_ACC": mobile_acc_validation,
-            },
+            "분리파일검증": category_validations,
         }
     else:
         st.download_button(
@@ -743,10 +747,10 @@ def show_result(
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
         )
-    st.subheader("최종 결과 미리보기")
-    if result["final"].empty:
-        st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
-    st.dataframe(result["final"], use_container_width=True)
+        st.subheader("최종 결과 미리보기")
+        if result["final"].empty:
+            st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
+        st.dataframe(result["final"], use_container_width=True)
     if file_info:
         with st.expander("입력 파일 정보", expanded=False):
             st.dataframe(pd.DataFrame(file_info), use_container_width=True)

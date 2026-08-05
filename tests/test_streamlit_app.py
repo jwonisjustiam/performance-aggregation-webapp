@@ -38,6 +38,12 @@ def test_streamlit_entrypoint_and_docs() -> None:
     assert "워치9 사전판매 판매 실적 취합" not in app_source
     assert "selected_job[\"title\"]" in app_source
     assert "raw_files_{job_type}" in app_source
+    assert 'with st.expander("입력 SKU 일정·시간 필터"' in app_source
+    assert app_source.index('with st.expander("입력 SKU 일정·시간 필터"') > app_source.index("st.title(selected_job")
+    assert 'st.tabs([item[0] for item in category_specs])' in app_source
+    assert '"Basic 결과"' in app_source
+    assert '"웨어러블 결과"' in app_source
+    assert '"모바일 ACC 결과"' in app_source
     assert "방송 실적표" not in app_source
     assert "네이버 API 자동 수집" not in app_source
     assert "fetch_raw_data" not in app_source

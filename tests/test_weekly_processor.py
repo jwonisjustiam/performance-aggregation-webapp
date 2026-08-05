@@ -157,6 +157,9 @@ def test_detail_filters_schedule_normalizes_orders_and_builds_three_outputs() ->
     assert set(result["basic"]["주문번호"]) == {"10001", "10002", "10003", "10004", "10005"}
     assert set(result["wearable"]["주문번호"]) == {"10001", "10002", "10003", "10004", "10005"}
     assert set(result["mobile_acc"]["주문번호"]) == {"20001"}
+    assert "버전" in result["basic"].columns
+    assert "버전" not in result["wearable"].columns
+    assert "버전" not in result["mobile_acc"].columns
     assert set(result["excluded"]["주문번호"]) == {"30-001", "40-001"}
     assert final["주문번호"].str.fullmatch(r"\d+").all()
 

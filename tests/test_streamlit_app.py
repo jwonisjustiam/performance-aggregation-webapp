@@ -30,9 +30,12 @@ def test_streamlit_entrypoint_and_docs() -> None:
     assert "import streamlit as st" in app_source
     assert "사용 안내" in app_source
     assert "JOB_TYPE_OPTIONS" in app_source
-    assert "삼성 취합" in app_source
-    assert "위클리 취합" in app_source
-    assert "워치9 사전판매 판매 실적 취합" in app_source
+    assert "라이브 SKU 구분 도구" in app_source
+    assert "라이브 일정별 구분 도구" in app_source
+    assert "입력 SKU 구분 도구" in app_source
+    assert "삼성 취합" not in app_source
+    assert "위클리 취합" not in app_source
+    assert "워치9 사전판매 판매 실적 취합" not in app_source
     assert "selected_job[\"title\"]" in app_source
     assert "raw_files_{job_type}" in app_source
     assert "방송 실적표" not in app_source

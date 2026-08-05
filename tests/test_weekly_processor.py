@@ -126,29 +126,46 @@ def test_disabled_wearable_session_orders_are_excluded() -> None:
     assert len(result["excluded"]) == 1
 
 
-def test_detail_watch9_presale_splits_wearable_and_mobile_acc_without_live_time_rules() -> None:
+def test_detail_filters_schedule_normalizes_orders_and_builds_three_outputs() -> None:
     frame = pd.DataFrame(
         [
-            ["A", "2026-07-07 14:00", "갤럭시 워치9", "", "SM-L340NZEAKOO", 1_000_000, 0, "검색"],
-            ["B", "2026-07-07 15:00", "충전 어댑터", "EF-QF976CTEGKR", "SELLER-B", 500_000, 0, "검색"],
-            ["C", "2026-07-07 16:00", "갤럭시 워치9", "OPT-C", "SELLER-C", 500_000, 0, "쇼핑라이브"],
+            ["10,001", "2026-07-07 14:00", "워치9 40mm", "", "SM-L340NZEAKOO", 1_000_000, 0, "검색"],
+            ["10-002", "2026-07-07 14:10", "워치9 40mm", "SM-L345NZKAKOO", "", 1_000_000, 0, "검색"],
+            ["10/003", "2026-07-07 15:00", "워치9 44mm", "SM-L350NZKAKOO", "", 1_000_000, 0, "검색"],
+            ["10.004", "2026-07-07 15:10", "워치9 44mm", "SM-L355NZKAKOO", "", 1_000_000, 0, "검색"],
+            ["10 005", "2026-07-07 16:00", "울트라2", "SM-L715NZSAKOO", "", 1_000_000, 0, "검색"],
+            ["20-001", "2026-07-07 16:30", "충전 어댑터", "EF-QF976CTEGKR", "", 500_000, 0, "검색"],
+            ["30-001", "2026-07-08 14:00", "필터 밖 워치", "SM-L340NZEAKOO", "", 500_000, 0, "검색"],
+            ["40-001", "2026-07-07 15:30", "미분류", "OPT-C", "SELLER-C", 500_000, 0, "쇼핑라이브"],
         ],
         columns=["주문번호", "결제일시", "상품명", "옵션관리코드", "판매자 상품코드", "상품가격", "옵션가격", "주문 유입경로"],
     )
-    result = process_detail(frame, "주문.xlsx")
+    result = process_detail(
+        frame,
+        "주문.xlsx",
+        date_range=(date(2026, 7, 7), date(2026, 7, 7)),
+        time_range=(time(14, 0), time(17, 0)),
+    )
     final = result["final"]
     assert list(final.columns) == ["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"]
-    assert set(result["wearable"]["주문번호"]) == {"A"}
-    assert set(result["mobile_acc"]["주문번호"]) == {"B"}
-    assert set(result["excluded"]["주문번호"]) == {"C"}
-    assert final.loc[final["주문번호"] == "A", "옵션 관리 코드"].iloc[0] == "SM-L340NZEAKOO"
+    assert set(result) >= {"basic", "wearable", "mobile_acc"}
+    assert result["basic"].groupby("버전").size().to_dict() == {
+        "워치9 40mm": 2,
+        "워치9 44mm": 2,
+        "울트라2": 1,
+    }
+    assert set(result["basic"]["주문번호"]) == {"10001", "10002", "10003", "10004", "10005"}
+    assert set(result["wearable"]["주문번호"]) == {"10001", "10002", "10003", "10004", "10005"}
+    assert set(result["mobile_acc"]["주문번호"]) == {"20001"}
+    assert set(result["excluded"]["주문번호"]) == {"30-001", "40-001"}
+    assert final["주문번호"].str.fullmatch(r"\d+").all()
 
 
 def test_detail_uses_date_alias_and_short_sku_from_product_name() -> None:
     raw = pd.DataFrame(
         [
             {
-                "주문번호": "A",
+                "주문번호": "10,001",
                 "주문일시": "2026.07.30",
                 "상품명": "삼성전자 갤럭시 워치9 블루투스 44mm SM-L350N 리뷰신세계2만+강화유리2매",
                 "수량": 1,
@@ -158,7 +175,8 @@ def test_detail_uses_date_alias_and_short_sku_from_product_name() -> None:
     )
     frame = canonicalize_columns(raw, "주문 raw.xlsx")
     result = process_detail(frame, "주문 raw.xlsx")
-    assert set(result["wearable"]["주문번호"]) == {"A"}
+    assert set(result["wearable"]["주문번호"]) == {"10001"}
+    assert set(result["basic"]["버전"]) == {"워치9 44mm"}
     assert result["wearable"].loc[0, "옵션 관리 코드"] == "SM-L350N"
 
 

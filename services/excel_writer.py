@@ -41,7 +41,7 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
     if job_type == "weekly":
         required = ["회차별 합계"]
     elif job_type == "detail":
-        required = ["웨어러블", "모바일 ACC", "전체 미리보기"]
+        required = ["Basic", "웨어러블", "모바일 ACC"]
     else:
         required = ["통합 실적표", "회차별 합계", "중복 주문 검증"]
     with tempfile.TemporaryDirectory() as temporary:
@@ -50,9 +50,9 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
             if job_type == "weekly":
                 result["final"].to_excel(writer, sheet_name="회차별 합계", index=False)
             elif job_type == "detail":
+                result.get("basic", pd.DataFrame()).to_excel(writer, sheet_name="Basic", index=False)
                 result.get("wearable", pd.DataFrame()).to_excel(writer, sheet_name="웨어러블", index=False)
                 result.get("mobile_acc", pd.DataFrame()).to_excel(writer, sheet_name="모바일 ACC", index=False)
-                result["final"].to_excel(writer, sheet_name="전체 미리보기", index=False)
             else:
                 result["final"].to_excel(writer, sheet_name="통합 실적표", index=False)
                 result["summary"].to_excel(writer, sheet_name="회차별 합계", index=False)
@@ -61,9 +61,9 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
             path,
             {
                 "회차별 합계": {"금액(백만)": "0.###", "총 금액": "#,##0", "duration (분)": "0", "수량": "0", "전환율": "0"},
-                "웨어러블": {"금액": "#,##0"},
-                "모바일 ACC": {"금액": "#,##0"},
-                "전체 미리보기": {"금액": "#,##0"},
+                "Basic": {"금액": "#,##0", "주문번호": "@"},
+                "웨어러블": {"금액": "#,##0", "주문번호": "@"},
+                "모바일 ACC": {"금액": "#,##0", "주문번호": "@"},
                 "통합 실적표": {"실적(대)": "0", "Duration (분)": "0", "DURATION (분)": "0", "View(만)": "0.###"},
                 "중복 주문 검증": {"주문 금액": "#,##0"},
             },
@@ -80,7 +80,7 @@ def create_single_sheet_workbook(sheet_name: str, frame: pd.DataFrame, allow_emp
         path = Path(temporary) / "result.xlsx"
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             frame.to_excel(writer, sheet_name=sheet_name, index=False)
-        _style(path, {sheet_name: {"금액": "#,##0"}})
+        _style(path, {sheet_name: {"금액": "#,##0", "주문번호": "@"}})
         validation = validate_saved_workbook(path, [sheet_name], allow_empty_sheets=allow_empty)
         if not validation["valid"]:
             raise ValueError(f"결과 파일 검증 실패: {validation}")

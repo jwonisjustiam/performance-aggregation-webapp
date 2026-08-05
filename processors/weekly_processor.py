@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import re
 
 import pandas as pd
@@ -125,6 +125,12 @@ MOBILE_ACC_SKUS = {
     "GP-FPL716KDBTK",
 }
 
+BASIC_MODEL_SKUS = {
+    "워치9 40mm": {"SM-L340", "SM-L345"},
+    "워치9 44mm": {"SM-L350", "SM-L355"},
+    "울트라2": {"SM-L715"},
+}
+
 
 def infer_weekly_kind(file_name: str, selected_type: str | None = None) -> str:
     has_external = "외장하드" in file_name
@@ -190,6 +196,42 @@ def _selected_option_code(row: pd.Series) -> str:
 
 def _normalize_sku(value: object) -> str:
     return normalize_sku(value)
+
+
+def _digits_only_order_number(value: object) -> str:
+    """Return an order number containing digits only, without separators."""
+    if value is None or pd.isna(value):
+        return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        if numeric.is_integer():
+            return str(int(numeric))
+    text = str(value).strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    return re.sub(r"\D", "", text)
+
+
+def _matches_detail_schedule(
+    payment: pd.Timestamp,
+    date_range: tuple[date, date] | None,
+    time_range: tuple[time, time] | None,
+) -> bool:
+    if pd.isna(payment):
+        return False
+    if date_range is not None:
+        start_date, end_date = date_range
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+        if not start_date <= payment.date() <= end_date:
+            return False
+    if time_range is not None:
+        start_time, end_time = time_range
+        payment_time = payment.time()
+        if start_time <= end_time:
+            return start_time <= payment_time <= end_time
+        return payment_time >= start_time or payment_time <= end_time
+    return True
 
 
 def _matches_optional_sku_filter(row: pd.Series, allowed_skus: set[str] | None) -> bool:
@@ -304,8 +346,10 @@ def process_detail(
     selected_type: str | None = None,
     wearable_skus: set[str] | None = None,
     mobile_acc_skus: set[str] | None = None,
+    date_range: tuple[date, date] | None = None,
+    time_range: tuple[time, time] | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Create Watch9 pre-order detail outputs without live-time or session rules."""
+    """Create filtered Basic, wearable, and mobile-ACC detail outputs."""
     missing = missing_columns(raw_df, DETAIL_REQUIRED)
     if missing:
         raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
@@ -328,6 +372,19 @@ def process_detail(
     source["_mobile_acc_match"] = source["_sku"].map(
         lambda value: sku_matches_any(value, active_mobile_acc_skus)
     )
+    source["_basic_model"] = source["_sku"].map(
+        lambda value: next(
+            (
+                model_name
+                for model_name, model_skus in BASIC_MODEL_SKUS.items()
+                if sku_matches_any(value, model_skus)
+            ),
+            "",
+        )
+    )
+    source["_schedule_match"] = source["_payment"].map(
+        lambda value: _matches_detail_schedule(value, date_range, time_range)
+    )
 
     def build_category_frame(category_name: str, mask: pd.Series) -> pd.DataFrame:
         detail = source.loc[mask].copy()
@@ -336,6 +393,7 @@ def process_detail(
         final = detail.assign(
             버전=category_name,
             **{
+                "주문번호": detail["주문번호"].map(_digits_only_order_number),
                 "옵션 관리 코드": detail["_selected_option_code"],
                 "금액": detail["_amount"],
             },
@@ -345,14 +403,24 @@ def process_detail(
             kind="stable",
         )
 
-    wearable = build_category_frame("웨어러블", source["_wearable_match"])
-    mobile_acc = build_category_frame("모바일 ACC", source["_mobile_acc_match"])
-    category_frames = [frame for frame in (wearable, mobile_acc) if not frame.empty]
+    basic_parts = [
+        build_category_frame(model_name, source["_basic_model"].eq(model_name) & source["_schedule_match"])
+        for model_name in BASIC_MODEL_SKUS
+    ]
+    basic = pd.concat([frame for frame in basic_parts if not frame.empty], ignore_index=True) if any(
+        not frame.empty for frame in basic_parts
+    ) else pd.DataFrame(columns=["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"])
+    wearable = build_category_frame("웨어러블", source["_wearable_match"] & source["_schedule_match"])
+    mobile_acc = build_category_frame("모바일 ACC", source["_mobile_acc_match"] & source["_schedule_match"])
+    category_frames = [frame for frame in (basic, wearable, mobile_acc) if not frame.empty]
     if category_frames:
         final = pd.concat(category_frames, ignore_index=True, sort=False)
     else:
         final = pd.DataFrame(columns=["버전", "결제일시", "주문번호", "상품명", "옵션 관리 코드", "금액"])
-    excluded = source.loc[~source["_wearable_match"] & ~source["_mobile_acc_match"]].copy()
+    excluded = source.loc[
+        (~source["_wearable_match"] & ~source["_mobile_acc_match"] & source["_basic_model"].eq(""))
+        | ~source["_schedule_match"]
+    ].copy()
     errors = source.loc[source["_payment"].isna()].copy()
     return {
         "final": final,
@@ -361,6 +429,7 @@ def process_detail(
         "duplicates": duplicates,
         "errors": errors,
         "extra_details": pd.DataFrame(),
+        "basic": basic,
         "wearable": wearable,
         "mobile_acc": mobile_acc,
     }

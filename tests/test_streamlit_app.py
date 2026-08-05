@@ -86,7 +86,7 @@ def test_detail_workbook_sheet_is_created() -> None:
     path.write_bytes(content)
     workbook = load_workbook(path, read_only=True)
     try:
-        assert workbook.sheetnames == ["웨어러블", "모바일 ACC", "전체 미리보기"]
+        assert workbook.sheetnames == ["Basic", "웨어러블", "모바일 ACC"]
     finally:
         workbook.close()
         path.unlink(missing_ok=True)

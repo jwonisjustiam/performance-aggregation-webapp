@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from processors import process_detail, process_samsung, process_weekly
-from processors.weekly_processor import MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
+from processors.weekly_processor import BASIC_MODEL_SKUS, MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_workbook
 from services.excel_writer import create_result_workbook
 from services.time_slotter import slots_for_date
@@ -43,7 +43,7 @@ JOB_TYPE_OPTIONS = {
     "입력 SKU 구분 도구": {
         "code": "detail",
         "title": "입력 SKU 구분 도구",
-        "caption": "Raw Data 전체에서 옵션 관리 코드 또는 판매자 상품 코드 기준으로 웨어러블/모바일 ACC 판매 실적 상세 목록을 생성합니다.",
+        "caption": "선택한 일정·시간 안에서 SKU 기준으로 Basic/웨어러블/모바일 ACC 판매 실적 상세 목록을 생성합니다.",
         "upload_label": "워치9 사전판매 Raw Data .xlsx/.xls 파일",
     },
 }
@@ -425,6 +425,10 @@ def analyze_frame(
             detail_kwargs["wearable_skus"] = None if rule_settings is None else rule_settings.get("wearable_skus")
         if "mobile_acc_skus" in detail_parameters:
             detail_kwargs["mobile_acc_skus"] = None if rule_settings is None else rule_settings.get("mobile_acc_skus")
+        if "date_range" in detail_parameters:
+            detail_kwargs["date_range"] = None if rule_settings is None else rule_settings.get("detail_date_range")
+        if "time_range" in detail_parameters:
+            detail_kwargs["time_range"] = None if rule_settings is None else rule_settings.get("detail_time_range")
         result = process_detail(frame, combined_names, None, **detail_kwargs)
     else:
         weekly_kind = None
@@ -443,7 +447,7 @@ def analyze_frame(
             "missing_sheets": [],
             "formula_errors": [],
             "empty_sheets": [],
-            "note": "워치9 사전판매 결과는 웨어러블/모바일 ACC 별도 다운로드에서 생성합니다.",
+            "note": "입력 SKU 구분 결과는 Basic/웨어러블/모바일 ACC 별도 다운로드에서 생성합니다.",
         }
     else:
         content, validation = create_result_workbook(job_type, result)
@@ -460,8 +464,9 @@ def render_usage_guide() -> None:
             3. 라이브 SKU 구분 도구는 `삼성 모델/SKU 시작값`을 화면에서 수정할 수 있습니다. 기본값은 `SM-`입니다.
             4. 라이브 일정별 구분 도구는 `외장하드` 또는 `웨어러블` 유형을 선택한 뒤 주문 Raw Data 엑셀을 업로드하세요.
             5. 라이브 일정별 구분 도구는 `위클리 포함 SKU 목록`을 비워두면 기존처럼 전체 쇼핑라이브 주문을 취합하고, 값을 입력하면 해당 SKU만 취합합니다.
-            6. 입력 SKU 구분 도구는 라이브 시간/회차 규칙 없이 옵션 관리 코드, 판매자 상품 코드 또는 상품명 속 SKU로 `웨어러블`, `모바일 ACC` 두 결과를 만듭니다.
-            7. 입력 SKU 구분 도구에서는 화면의 SKU 목록을 직접 수정한 뒤 분석할 수 있습니다.
+            6. 입력 SKU 구분 도구는 선택한 일정·시간 안에서 옵션 관리 코드, 판매자 상품 코드 또는 상품명 속 SKU로 `Basic`, `웨어러블`, `모바일 ACC` 세 결과를 만듭니다.
+            7. `Basic`은 워치9 40mm(SM-L340/SM-L345), 워치9 44mm(SM-L350/SM-L355), 울트라2(SM-L715)로 구분합니다.
+            8. 입력 SKU 구분 도구에서는 일정·시간 필터와 SKU 목록을 직접 수정한 뒤 분석할 수 있습니다.
             8. 네이버, 11번가, 지마켓, 옥션, 카카오의 `.xlsx`/`.xls` Raw Data를 지원합니다.
             9. 암호 파일은 `0000`, `1234`를 자동으로 시도합니다.
             10. 쇼핑라이브 구분 열이 없는 파일은 업로드된 행 전체를 후보로 사용하므로, 원본 전체를 올릴 때는 SKU/날짜/회차 조건을 확인하세요.
@@ -507,7 +512,40 @@ def main() -> None:
             )
             rule_settings["samsung_model_prefixes"] = parse_prefix_values(samsung_prefix_text)
         elif job_type == "detail":
+            st.subheader("일정·시간 필터")
+            detail_filter_enabled = st.checkbox(
+                "결제일시 필터 사용",
+                value=False,
+                help="선택하지 않으면 업로드한 전체 일정과 시간을 대상으로 합니다.",
+            )
+            if detail_filter_enabled:
+                detail_date_selection = st.date_input(
+                    "대상 날짜 범위",
+                    value=(date.today(), date.today()),
+                    key="detail_date_range",
+                )
+                detail_dates = expand_date_selection(detail_date_selection)
+                detail_time_columns = st.columns(2)
+                detail_start_time = detail_time_columns[0].time_input(
+                    "시작 시간",
+                    value=time(0, 0),
+                    key="detail_start_time",
+                )
+                detail_end_time = detail_time_columns[1].time_input(
+                    "종료 시간",
+                    value=time(23, 59, 59),
+                    key="detail_end_time",
+                )
+                if detail_dates:
+                    rule_settings["detail_date_range"] = (detail_dates[0], detail_dates[-1])
+                rule_settings["detail_time_range"] = (detail_start_time, detail_end_time)
+                if detail_start_time > detail_end_time:
+                    st.caption("종료 시간이 시작 시간보다 이르면 자정을 넘기는 시간대로 적용됩니다.")
             st.subheader("워치9 분류 규칙")
+            st.caption(
+                "Basic 고정 분류: "
+                + ", ".join(f"{name} = {'/'.join(sorted(skus))}" for name, skus in BASIC_MODEL_SKUS.items())
+            )
             st.caption("쉼표 또는 줄바꿈으로 구분해서 수정할 수 있습니다. 비워두면 해당 버전 결과가 0건으로 나옵니다.")
             wearable_rule_text = st.text_area(
                 "웨어러블 SKU 목록",
@@ -526,7 +564,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-08-03 웹 날짜 범위 직접 선택")
+    st.caption("배포 버전: 2026-08-05 입력 SKU 일정·시간 필터 및 Basic 출력")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -666,17 +704,24 @@ def show_result(
             "원본 전체 파일이라면 SKU·날짜·회차 조건을 반드시 확인하세요."
         )
     if job_type == "detail":
-        download_columns = st.columns(2)
+        download_columns = st.columns(3)
+        basic_content, basic_validation = create_single_sheet_workbook("Basic", result.get("basic", pd.DataFrame()))
         wearable_content, wearable_validation = create_single_sheet_workbook("웨어러블", result.get("wearable", pd.DataFrame()))
         mobile_acc_content, mobile_acc_validation = create_single_sheet_workbook("모바일 ACC", result.get("mobile_acc", pd.DataFrame()))
         download_columns[0].download_button(
-            "웨어러블 결과 엑셀 다운로드",
-            data=wearable_content,
-            file_name=build_category_download_filename("웨어러블", result.get("wearable", pd.DataFrame())),
+            "Basic 결과 엑셀 다운로드",
+            data=basic_content,
+            file_name=build_category_download_filename("Basic", result.get("basic", pd.DataFrame())),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
         )
         download_columns[1].download_button(
+            "웨어러블 결과 엑셀 다운로드",
+            data=wearable_content,
+            file_name=build_category_download_filename("웨어러블", result.get("wearable", pd.DataFrame())),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        download_columns[2].download_button(
             "모바일 ACC 결과 엑셀 다운로드",
             data=mobile_acc_content,
             file_name=build_category_download_filename("모바일 ACC", result.get("mobile_acc", pd.DataFrame())),
@@ -685,6 +730,7 @@ def show_result(
         validation = {
             **validation,
             "분리파일검증": {
+                "Basic": basic_validation,
                 "웨어러블": wearable_validation,
                 "모바일_ACC": mobile_acc_validation,
             },

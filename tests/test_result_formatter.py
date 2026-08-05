@@ -54,4 +54,4 @@ def test_detail_workbook_reopens(tmp_path: Path) -> None:
     path = tmp_path / "detail result.xlsx"
     path.write_bytes(content)
     assert validation["valid"]
-    assert validate_saved_workbook(path, ["웨어러블", "모바일 ACC", "전체 미리보기"])["valid"]
+    assert validate_saved_workbook(path, ["Basic", "웨어러블", "모바일 ACC"])["valid"]

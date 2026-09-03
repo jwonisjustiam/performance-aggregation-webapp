@@ -16,6 +16,7 @@ from processors import process_detail, process_samsung, process_weekly
 from processors.weekly_processor import BASIC_MODEL_SKUS, MOBILE_ACC_SKUS, WEARABLE_SKUS, infer_weekly_kind
 from services.excel_reader import XLS_ERROR, read_workbook
 from services.excel_writer import create_result_workbook
+from services.live_stats import read_live_stats_upload
 from services.time_slotter import slots_for_date
 from services.validator import input_diagnostics
 from rules.weekly_rules import SlotRule
@@ -416,6 +417,8 @@ def analyze_frame(
             weekly_kwargs["allowed_skus"] = None if rule_settings is None else rule_settings.get("weekly_skus")
         if "custom_slots" in signature(process_weekly).parameters:
             weekly_kwargs["custom_slots"] = None if rule_settings is None else rule_settings.get("custom_slots")
+        if "live_stats" in signature(process_weekly).parameters:
+            weekly_kwargs["live_stats"] = None if rule_settings is None else rule_settings.get("live_stats")
         result = process_weekly(frame, combined_names, selected, **weekly_kwargs)
     elif job_type == "detail":
         weekly_kind = None
@@ -437,6 +440,8 @@ def analyze_frame(
             samsung_kwargs["model_prefixes"] = None if rule_settings is None else rule_settings.get("samsung_model_prefixes")
         if "custom_slots" in signature(process_samsung).parameters:
             samsung_kwargs["custom_slots"] = None if rule_settings is None else rule_settings.get("custom_slots")
+        if "live_stats" in signature(process_samsung).parameters:
+            samsung_kwargs["live_stats"] = None if rule_settings is None else rule_settings.get("live_stats")
         result = process_samsung(frame, combined_names, **samsung_kwargs)
 
     filename = build_download_filename(job_type, result, payment_dates, weekly_kind)
@@ -472,6 +477,7 @@ def render_usage_guide() -> None:
             10. 쇼핑라이브 구분 열이 없는 파일은 업로드된 행 전체를 후보로 사용하므로, 원본 전체를 올릴 때는 SKU/날짜/회차 조건을 확인하세요.
             11. 날짜 열은 `결제일시`, `예약결제완료일시`, `주문일시`, `결제일`을 인식하며 `YYYY.MM.DD` 형식도 처리합니다.
             12. 옵션 코드 열이 없거나 비어 있으면 상품명에서 `SM-L350N` 같은 SKU를 자동으로 찾습니다.
+            13. 네이버 쇼핑라이브 통계 수집기 CSV를 함께 올리면 `라이브중 시청수`로 View(만)을, `유니크 결제자수 ÷ 라이브중 시청수 × 100`으로 전환율을 계산합니다.
             """
         )
 
@@ -535,7 +541,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-08-05 입력 SKU 일정·시간 필터 및 Basic 출력")
+    st.caption("배포 버전: 2026-09-03 네이버 라이브 통계 View·전환율 연결")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -545,6 +551,45 @@ def main() -> None:
         accept_multiple_files=True,
         key=f"raw_files_{job_type}",
     )
+
+    if job_type in {"samsung", "weekly"}:
+        if job_type == "samsung" or weekly_type == "wearable":
+            expected_store = "삼성파트너 쇼마젠시 (웨어러블)"
+        elif weekly_type == "external":
+            expected_store = "삼성공식파트너 쇼마젠시 (외장하드)"
+        else:
+            expected_store = "선택한 위클리 유형에 맞는 스토어"
+        with st.expander("네이버 쇼핑라이브 통계 연결", expanded=True):
+            st.caption(f"대상 스토어: {expected_store}")
+            st.caption(
+                "로그인된 네이버 쇼핑라이브 방송 목록에서 날짜를 조회한 뒤, 함께 제공되는 브라우저 수집기로 CSV를 만드세요. "
+                "통계가 없는 회차의 View(만)과 전환율은 빈칸으로 유지됩니다."
+            )
+            stats_upload = st.file_uploader(
+                "네이버 라이브 통계 CSV/XLSX",
+                type=["csv", "xlsx", "xls"],
+                key=f"live_stats_{job_type}_{weekly_type}",
+            )
+            if stats_upload is not None:
+                try:
+                    stats_frame = read_live_stats_upload(stats_upload)
+                    expected_store_name = expected_store.split(" (", 1)[0]
+                    reported_stores = {
+                        str(value).strip()
+                        for value in stats_frame["계정"].dropna()
+                        if str(value).strip()
+                    }
+                    unexpected_stores = reported_stores - {expected_store_name}
+                    if expected_store_name.startswith("삼성") and unexpected_stores:
+                        raise ValueError(
+                            f"선택한 업무의 대상은 '{expected_store_name}'이지만 "
+                            f"통계 파일에는 {', '.join(sorted(unexpected_stores))} 계정이 들어 있습니다."
+                        )
+                    rule_settings["live_stats"] = stats_frame
+                    st.success(f"방송 통계 {len(stats_frame):,}건을 읽었습니다.")
+                    st.dataframe(stats_frame, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.error(f"통계 파일을 읽을 수 없습니다: {exc}")
 
     if job_type == "detail":
         with st.expander("입력 SKU 일정·시간 필터", expanded=True):
@@ -751,6 +796,12 @@ def show_result(
         if result["final"].empty:
             st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
         st.dataframe(result["final"], use_container_width=True)
+        stats_audit = result.get("live_stats", pd.DataFrame())
+        if not stats_audit.empty:
+            matched_count = int(stats_audit["매칭 여부"].eq("매칭").sum())
+            st.caption(f"네이버 통계 매칭: {matched_count:,}/{len(stats_audit):,}개 회차")
+            with st.expander("네이버 통계 매칭 상세", expanded=False):
+                st.dataframe(stats_audit, use_container_width=True, hide_index=True)
     if file_info:
         with st.expander("입력 파일 정보", expanded=False):
             st.dataframe(pd.DataFrame(file_info), use_container_width=True)

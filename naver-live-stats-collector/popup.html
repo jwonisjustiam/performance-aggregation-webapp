@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>쇼핑라이브 통계 수집기</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <h1>쇼핑라이브 통계 수집기</h1>
+    <ol>
+      <li>업무에 맞는 스토어로 이동합니다.</li>
+      <li>쇼핑라이브 관리툴의 라이브 목록에서 날짜를 조회합니다.</li>
+      <li>아래 계정을 선택하고 수집을 시작합니다.</li>
+    </ol>
+    <label for="store">현재 스토어</label>
+    <select id="store">
+      <option value="삼성공식파트너 쇼마젠시">외장하드 · 삼성공식파트너 쇼마젠시</option>
+      <option value="삼성파트너 쇼마젠시">웨어러블 · 삼성파트너 쇼마젠시</option>
+    </select>
+    <button id="collect" type="button">현재 조회 목록 통계 수집</button>
+    <p id="status" role="status">종료된 방송만 수집합니다.</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -22,6 +22,31 @@ def test_midnight_and_empty_slots_are_kept(weekly_frame: pd.DataFrame) -> None:
     assert (result["수량"] == 0).any()
 
 
+def test_weekly_conversion_uses_unique_payers_and_live_viewers(weekly_frame: pd.DataFrame) -> None:
+    stats = pd.DataFrame(
+        [
+            {
+                "계정": "삼성공식파트너 쇼마젠시",
+                "방송 ID": "100",
+                "방송 제목": "외장하드 라이브",
+                "방송일시": pd.Timestamp("2026-06-22 11:48"),
+                "라이브중 시청수": 200,
+                "유니크 결제자수": 5,
+                "결제 상품수": 7,
+                "데이터 업데이트 시각": pd.Timestamp("2026-06-23 10:00"),
+            }
+        ]
+    )
+
+    result = process_weekly(weekly_frame, "외장하드 주문.xlsx", live_stats=stats)
+    matched = result["final"].query("시간 == '11:50'").iloc[0]
+    unmatched = result["final"].query("시간 == '14:00'").iloc[0]
+
+    assert matched["전환율"] == pytest.approx(2.5)
+    assert pd.isna(unmatched["전환율"])
+    assert result["live_stats"].query("`회차 시작 시간` == '11:50'").iloc[0]["매칭 여부"] == "매칭"
+
+
 def test_exact_duplicate_removed(weekly_frame: pd.DataFrame) -> None:
     duplicated = pd.concat([weekly_frame, weekly_frame.iloc[[0]]], ignore_index=True)
     result = process_weekly(duplicated, "외장하드.xlsx")

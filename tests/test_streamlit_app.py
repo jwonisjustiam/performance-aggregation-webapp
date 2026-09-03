@@ -47,6 +47,9 @@ def test_streamlit_entrypoint_and_docs() -> None:
     assert "방송 실적표" not in app_source
     assert "네이버 API 자동 수집" not in app_source
     assert "fetch_raw_data" not in app_source
+    assert "네이버 쇼핑라이브 통계 연결" in app_source
+    assert "read_live_stats_upload" in app_source
+    assert (ROOT / "naver-live-stats-collector" / "manifest.json").exists()
     assert any(line.strip().startswith("streamlit") for line in requirements.splitlines())
     assert "fastapi" not in requirements.lower()
     assert "requests==" not in requirements.lower()

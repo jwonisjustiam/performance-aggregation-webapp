@@ -10,6 +10,7 @@ import pandas as pd
 from processors.weekly_processor import infer_target_dates
 from rules.samsung_rules import DEFAULT_BROADCAST_VALUES
 from services.amount_resolver import resolve_amount
+from services.live_stats import match_live_stats, stats_audit_row
 from services.result_formatter import shorten_model
 from services.sku_resolver import extract_sku_code
 from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
@@ -68,6 +69,7 @@ def process_samsung(
     optional_broadcast_df: pd.DataFrame | None = None,
     model_prefixes: tuple[str, ...] | None = None,
     custom_slots: CustomSlots | None = None,
+    live_stats: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Aggregate Samsung SM orders into the three required result sheets."""
     missing = missing_columns(raw_df, REQUIRED)
@@ -152,9 +154,14 @@ def process_samsung(
     representatives = pd.DataFrame(representative_rows)
     integrated: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
+    stats_audit: list[dict[str, object]] = []
     output_dates = target_dates or sorted(source.loc[source["_date_ok"], "_broadcast_date"].dropna().unique()) or [fallback_target]
     for target in output_dates:
         for slot in slots_for_date("wearable", target, custom_slots):
+            matched_stats = match_live_stats(live_stats, target, slot.start)
+            live_viewers = None if matched_stats is None else pd.to_numeric(matched_stats.get("라이브중 시청수"), errors="coerce")
+            view_in_ten_thousands = None if live_viewers is None or pd.isna(live_viewers) else float(live_viewers) / 10_000
+            stats_audit.append(stats_audit_row(target, slot.start, matched_stats))
             if not representatives.empty:
                 part = representatives[(representatives["_broadcast_date"] == target) & (representatives["_slot"] == slot.label)]
             else:
@@ -168,6 +175,7 @@ def process_samsung(
                 row_defaults["플랫폼"] = platform
                 row_defaults["제작 주체"] = production_owner
                 row_defaults["DURATION (분)"] = duration
+                row_defaults["View(만)"] = view_in_ten_thousands
                 integrated.append(
                     {
                         "월": target.month,
@@ -195,4 +203,12 @@ def process_samsung(
     duplicates = pd.DataFrame(verification_rows)
     excluded = source.loc[~eligible].copy()
     errors = source.loc[source["_payment"].isna() | source["_amount"].isna()].copy()
-    return {"final": final, "summary": summary, "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}
+    return {
+        "final": final,
+        "summary": summary,
+        "excluded": excluded,
+        "duplicates": duplicates,
+        "errors": errors,
+        "extra_details": pd.DataFrame(),
+        "live_stats": pd.DataFrame(stats_audit),
+    }

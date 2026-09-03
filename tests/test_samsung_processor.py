@@ -27,6 +27,30 @@ def test_integrated_and_summary_counts_match(samsung_frame: pd.DataFrame) -> Non
     assert result["final"]["실적(대)"].sum() == sum(value for value in result["summary"]["총 주문수"] if value != "")
 
 
+def test_samsung_view_uses_live_viewers_in_ten_thousands(samsung_frame: pd.DataFrame) -> None:
+    stats = pd.DataFrame(
+        [
+            {
+                "계정": "삼성파트너 쇼마젠시",
+                "방송 ID": "200",
+                "방송 제목": "웨어러블 라이브",
+                "방송일시": pd.Timestamp("2026-06-22 01:08"),
+                "라이브중 시청수": 12_345,
+                "유니크 결제자수": 10,
+                "결제 상품수": 11,
+                "데이터 업데이트 시각": pd.Timestamp("2026-06-23 10:00"),
+            }
+        ]
+    )
+
+    result = process_samsung(samsung_frame, live_stats=stats)
+    matched = result["final"].query("시간 == '01:10'")
+
+    assert not matched.empty
+    assert set(matched["View(만)"]) == {1.2345}
+    assert result["live_stats"].query("`회차 시작 시간` == '01:10'").iloc[0]["매칭 여부"] == "매칭"
+
+
 def test_seller_code_sm_is_used_when_option_code_is_non_sm() -> None:
     frame = pd.DataFrame(
         [["S1", "2026-06-22 01:20", "워치", 1, "EF-CASE", "SM-L320NDAAKOO", 200_000, 0, "쇼핑라이브"]],

@@ -8,6 +8,7 @@ import re
 import pandas as pd
 
 from services.amount_resolver import resolve_amount, to_millions
+from services.live_stats import conversion_percent, match_live_stats, stats_audit_row
 from services.sku_resolver import extract_sku_code, normalize_sku, sku_matches_any
 from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
@@ -317,27 +318,39 @@ def process_weekly(
     selected_type: str | None = None,
     allowed_skus: set[str] | None = None,
     custom_slots: CustomSlots | None = None,
+    live_stats: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Aggregate a weekly raw-order dataframe by broadcast date and slot."""
     kind, source, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type, allowed_skus, custom_slots)
     dates = source.attrs.get("target_dates") or sorted(date_value for date_value in source["_broadcast_date"].dropna().unique())
     rows: list[dict[str, object]] = []
+    stats_audit: list[dict[str, object]] = []
     active_custom_slots = source.attrs.get("custom_slots")
     for broadcast_date in dates:
         for slot in slots_for_date(kind, broadcast_date, active_custom_slots):
             part = included[(included["_broadcast_date"] == broadcast_date) & (included["_slot"] == slot.label)]
+            matched_stats = match_live_stats(live_stats, broadcast_date, slot.start)
+            stats_audit.append(stats_audit_row(broadcast_date, slot.start, matched_stats))
             rows.append(
                 {
                     "날짜": broadcast_date,
                     "시간": slot.start.strftime("%H:%M"),
                     "duration (분)": _slot_duration_minutes(slot),
                     "수량": int(part["_order_key"].nunique()),
-                    "전환율": 0,
+                    "전환율": conversion_percent(matched_stats),
                     "금액(백만)": to_millions(part["_amount"].sum()),
                 }
             )
     final = pd.DataFrame(rows, columns=["날짜", "시간", "duration (분)", "수량", "전환율", "금액(백만)"])
-    return {"final": final, "summary": final.copy(), "excluded": excluded, "duplicates": duplicates, "errors": errors, "extra_details": pd.DataFrame()}
+    return {
+        "final": final,
+        "summary": final.copy(),
+        "excluded": excluded,
+        "duplicates": duplicates,
+        "errors": errors,
+        "extra_details": pd.DataFrame(),
+        "live_stats": pd.DataFrame(stats_audit),
+    }
 
 
 def process_detail(

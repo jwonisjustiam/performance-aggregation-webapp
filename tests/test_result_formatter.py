@@ -1,6 +1,9 @@
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
+import pytest
+from openpyxl import load_workbook
 
 from processors.samsung_processor import process_samsung
 from processors.weekly_processor import process_detail, process_weekly
@@ -32,6 +35,40 @@ def test_weekly_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> 
     path.write_bytes(content)
     assert validation["valid"]
     assert validate_saved_workbook(path, ["회차별 합계"])["valid"]
+
+
+def test_weekly_conversion_excel_format(weekly_frame: pd.DataFrame) -> None:
+    stats = pd.DataFrame(
+        [
+            {
+                "계정": "삼성공식파트너 쇼마젠시",
+                "방송 ID": "100",
+                "방송 제목": "외장하드 라이브",
+                "방송일시": pd.Timestamp("2026-06-22 11:48"),
+                "라이브중 시청수": 200,
+                "유니크 결제자수": 5,
+                "결제 상품수": 7,
+                "데이터 업데이트 시각": pd.Timestamp("2026-06-23 10:00"),
+            }
+        ]
+    )
+    content, _ = create_result_workbook(
+        "weekly", process_weekly(weekly_frame, "외장하드.xlsx", live_stats=stats)
+    )
+    workbook = load_workbook(BytesIO(content), data_only=False)
+    try:
+        sheet = workbook["회차별 합계"]
+        headers = {cell.value: cell.column for cell in sheet[1]}
+        row = next(
+            row_number
+            for row_number in range(2, sheet.max_row + 1)
+            if sheet.cell(row_number, headers["시간"]).value == "11:50"
+        )
+        cell = sheet.cell(row, headers["전환율"])
+        assert cell.value == pytest.approx(2.5)
+        assert cell.number_format == '0.00"%"'
+    finally:
+        workbook.close()
 
 
 def test_samsung_workbook_reopens(tmp_path: Path, samsung_frame: pd.DataFrame) -> None:

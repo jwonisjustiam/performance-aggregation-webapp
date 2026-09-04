@@ -22,7 +22,7 @@ def test_midnight_and_empty_slots_are_kept(weekly_frame: pd.DataFrame) -> None:
     assert (result["실적 수량"] == 0).any()
 
 
-def test_weekly_conversion_uses_unique_payers_and_live_viewers(weekly_frame: pd.DataFrame) -> None:
+def test_weekly_conversion_uses_actual_quantity_and_views(weekly_frame: pd.DataFrame) -> None:
     stats = pd.DataFrame(
         [
             {
@@ -43,8 +43,9 @@ def test_weekly_conversion_uses_unique_payers_and_live_viewers(weekly_frame: pd.
     unmatched = result["final"].query("`시작 시간` == '14:00'").iloc[0]
 
     assert matched["실적 View(만)"] == pytest.approx(0.02)
-    assert matched["실적 전환율"] == pytest.approx(2.5)
+    assert matched["실적 전환율"] == pytest.approx(2 / 200)
     assert pd.isna(unmatched["실적 전환율"])
+    assert result["live_stats"].query("`회차 시작 시간` == '11:50'").iloc[0]["실적 전환율(%)"] == pytest.approx(1.0)
     assert matched["목표 View(만)"] == pytest.approx(0.2)
     assert matched["목표 수량"] == pytest.approx(100.0)
     assert matched["목표 금액(백만)"] == pytest.approx(24.0)
@@ -68,10 +69,28 @@ def test_weekly_output_uses_target_and_actual_sections(weekly_frame: pd.DataFram
     assert set(final["목표 수량"]) == {100.0}
     assert set(final["목표 금액(백만)"]) == {24.0}
     assert set(final["ai 여부"]) == {"AI"}
-    assert set(final["제작(대행사)"]) == {"KCI"}
+    assert set(final["제작(대행사)"]) == {"쇼마젠시"}
     assert set(final["출연자1"]) == {"AI"}
-    populated = final.query("`실적 금액(백만)` > 0").iloc[0]
-    assert populated["달성률"] == pytest.approx(populated["실적 금액(백만)"] / 24.0 * 100)
+    assert final["달성률"].isna().all()
+
+
+@pytest.mark.parametrize("viewers", [None, 0, 200])
+def test_weekly_conversion_zero_sales_and_missing_views(weekly_frame, viewers):
+    stats = None if viewers is None else pd.DataFrame([{
+        "방송일시": pd.Timestamp("2026-06-22 11:50"),
+        "라이브중 시청수": viewers,
+        "유니크 결제자수": 99,
+        "데이터 업데이트 시각": pd.Timestamp("2026-06-23 10:00"),
+    }])
+    final = process_weekly(weekly_frame, "외장하드.xlsx", live_stats=stats)["final"]
+    empty = final[(final["실적 수량"] == 0) & (final["실적 금액(백만)"] == 0)]
+    assert not empty.empty
+    assert empty["실적 전환율"].eq(0).all()
+    populated = final.query("`시작 시간` == '11:50'").iloc[0]
+    if viewers in (None, 0):
+        assert pd.isna(populated["실적 전환율"])
+    else:
+        assert populated["실적 전환율"] == pytest.approx(2 / viewers)
 
 
 def test_exact_duplicate_removed(weekly_frame: pd.DataFrame) -> None:

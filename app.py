@@ -477,7 +477,7 @@ def render_usage_guide() -> None:
             10. 쇼핑라이브 구분 열이 없는 파일은 업로드된 행 전체를 후보로 사용하므로, 원본 전체를 올릴 때는 SKU/날짜/회차 조건을 확인하세요.
             11. 날짜 열은 `결제일시`, `예약결제완료일시`, `주문일시`, `결제일`을 인식하며 `YYYY.MM.DD` 형식도 처리합니다.
             12. 옵션 코드 열이 없거나 비어 있으면 상품명에서 `SM-L350N` 같은 SKU를 자동으로 찾습니다.
-            13. 네이버 쇼핑라이브 통계 수집기 CSV를 함께 올리면 방송별 `시청/알림 통계` 박스의 `시청수`로 View(만)을, `유니크 결제자수 ÷ 시청수 × 100`으로 전환율을 계산합니다.
+            13. 네이버 쇼핑라이브 통계 수집기 CSV를 함께 올리면 방송별 `시청/알림 통계` 박스의 `시청수`로 View(만)을 채웁니다. 일정별 실적 전환율은 `실적 수량 ÷ (실적 View(만) × 10000)` 수식과 % 서식으로 출력합니다.
             """
         )
 
@@ -541,7 +541,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-09-03 일정별 목표·실적 28열 출력")
+    st.caption("배포 버전: 2026-09-04 일정별 전환율 수식·쇼마젠시·달성률 공란")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -563,7 +563,7 @@ def main() -> None:
             st.caption(f"대상 스토어: {expected_store}")
             st.caption(
                 "로그인된 네이버 쇼핑라이브 방송 목록에서 날짜를 조회한 뒤, 함께 제공되는 브라우저 수집기로 CSV를 만드세요. "
-                "통계가 없는 회차의 View(만)과 전환율은 빈칸으로 유지됩니다."
+                "통계가 없는 회차의 View(만)은 빈칸입니다. 다운로드 엑셀의 전환율은 단순 나눗셈 수식이므로 시청수가 0이거나 공란이면 #DIV/0!가 표시됩니다."
             )
             stats_upload = st.file_uploader(
                 "네이버 라이브 통계 CSV/XLSX",
@@ -795,7 +795,10 @@ def show_result(
         st.subheader("최종 결과 미리보기")
         if result["final"].empty:
             st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
-        st.dataframe(result["final"], use_container_width=True)
+        preview = result["final"]
+        if "실적 전환율" in preview.columns:
+            preview = preview.style.format({"실적 전환율": "{:.2%}"}, na_rep="")
+        st.dataframe(preview, use_container_width=True)
         stats_audit = result.get("live_stats", pd.DataFrame())
         if not stats_audit.empty:
             matched_count = int(stats_audit["매칭 여부"].eq("매칭").sum())

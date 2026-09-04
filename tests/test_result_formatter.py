@@ -48,7 +48,12 @@ def test_weekly_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> 
         assert sheet["R3"].value == pytest.approx(0.2)
         assert sheet["S3"].value == pytest.approx(100.0)
         assert sheet["T3"].value == pytest.approx(24.0)
-        assert sheet["Z3"].value == '=IFERROR(X3/T3*100,"")'
+        assert sheet["Z3"].value is None
+        assert sheet["AA3"].value == "쇼마젠시"
+        for row in range(3, sheet.max_row + 1):
+            assert sheet.cell(row, 23).value == f"=V{row}/(U{row}*10000)"
+            assert sheet.cell(row, 23).number_format == "0.00%"
+            assert sheet.cell(row, 26).value is None
         assert sheet.freeze_panes == "A3"
         assert workbook.calculation.calcMode == "auto"
         assert workbook.calculation.fullCalcOnLoad is True
@@ -85,8 +90,8 @@ def test_weekly_conversion_excel_format(weekly_frame: pd.DataFrame) -> None:
             if sheet.cell(row_number, headers["시작 시간"]).value == "11:50"
         )
         cell = sheet.cell(row, headers["전환율"])
-        assert cell.value == pytest.approx(2.5)
-        assert cell.number_format == '0.00"%"'
+        assert cell.value == f"=V{row}/(U{row}*10000)"
+        assert cell.number_format == "0.00%"
     finally:
         workbook.close()
 

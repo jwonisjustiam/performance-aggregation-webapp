@@ -8,7 +8,7 @@ import re
 import pandas as pd
 
 from services.amount_resolver import resolve_amount, to_millions
-from services.live_stats import conversion_percent, match_live_stats, stats_audit_row
+from services.live_stats import match_live_stats, stats_audit_row
 from services.sku_resolver import extract_sku_code, normalize_sku, sku_matches_any
 from services.time_slotter import assign_slot, inferred_broadcast_date, session_is_disabled, slots_for_date
 from services.validator import missing_columns
@@ -333,11 +333,20 @@ def process_weekly(
         for slot in slots_for_date(kind, broadcast_date, active_custom_slots):
             part = included[(included["_broadcast_date"] == broadcast_date) & (included["_slot"] == slot.label)]
             matched_stats = match_live_stats(live_stats, broadcast_date, slot.start)
-            stats_audit.append(stats_audit_row(broadcast_date, slot.start, matched_stats))
             live_viewers = None if matched_stats is None else pd.to_numeric(matched_stats.get("라이브중 시청수"), errors="coerce")
             actual_view = None if live_viewers is None or pd.isna(live_viewers) else float(live_viewers) / 10_000
             actual_quantity = int(part["_order_key"].nunique())
             actual_amount = to_millions(part["_amount"].sum())
+            if actual_quantity == 0 and actual_amount == 0:
+                actual_conversion = 0.0
+            elif actual_view is None or actual_view == 0:
+                actual_conversion = None
+            else:
+                actual_conversion = actual_quantity / (actual_view * 10_000)
+            audit = stats_audit_row(broadcast_date, slot.start, matched_stats)
+            audit.pop("전환율", None)
+            audit["실적 전환율(%)"] = None if actual_conversion is None else actual_conversion * 100
+            stats_audit.append(audit)
             rows.append(
                 {
                     "월": broadcast_date.month,
@@ -362,11 +371,11 @@ def process_weekly(
                     "목표 금액(백만)": WEEKLY_TARGET_AMOUNT_MILLIONS,
                     "실적 View(만)": actual_view,
                     "실적 수량": actual_quantity,
-                    "실적 전환율": conversion_percent(matched_stats),
+                    "실적 전환율": actual_conversion,
                     "실적 금액(백만)": actual_amount,
                     "비용률": None,
-                    "달성률": actual_amount / WEEKLY_TARGET_AMOUNT_MILLIONS * 100,
-                    "제작(대행사)": "KCI",
+                    "달성률": None,
+                    "제작(대행사)": "쇼마젠시",
                     "출연자1": "AI",
                 }
             )

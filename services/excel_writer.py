@@ -95,11 +95,12 @@ def _style_weekly_report(path: Path) -> None:
             sheet.cell(row, 20).number_format = "0.0"
             sheet.cell(row, 21).number_format = "0.###"
             sheet.cell(row, 22).number_format = "0"
-            sheet.cell(row, 23).number_format = '0.00"%"'
+            sheet.cell(row, 23).value = f"=V{row}/(U{row}*10000)"
+            sheet.cell(row, 23).number_format = "0.00%"
             sheet.cell(row, 24).number_format = "0.###"
             sheet.cell(row, 25).number_format = '0.00"%"'
-            sheet.cell(row, 26).value = f'=IFERROR(X{row}/T{row}*100,"")'
-            sheet.cell(row, 26).number_format = '0.00"%"'
+            sheet.cell(row, 26).value = None
+            sheet.cell(row, 26).number_format = "0.00%"
 
         widths = [5, 5, 6, 11, 10, 9, 12, 10, 11, 11, 11, 13, 10, 10, 15, 15, 12, 10, 9, 12, 10, 9, 10, 12, 9, 9, 13, 10]
         for column, width in enumerate(widths, start=1):

@@ -18,6 +18,7 @@ function waitForTab(tabId) {
 
 async function messageTab(tabId, message, retries = 20) {
   let lastError;
+  let injectionAttempted = false;
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
       const response = await chrome.tabs.sendMessage(tabId, message);
@@ -25,14 +26,23 @@ async function messageTab(tabId, message, retries = 20) {
       return response.data;
     } catch (error) {
       lastError = error;
+      const disconnected = /Receiving end does not exist|Could not establish connection/i.test(error.message || "");
+      if (!disconnected) throw error;
+      if (!injectionAttempted) {
+        injectionAttempted = true;
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ["content.js"]
+        });
+      }
       await sleep(300);
     }
   }
-  throw lastError;
+  throw new Error(`네이버 탭에 수집기를 연결하지 못했습니다. 페이지를 새로고침한 뒤 다시 실행해주세요. (${lastError?.message || "연결 실패"})`);
 }
 
 function csvText(rows) {
-  const columns = ["계정", "방송 ID", "방송 제목", "방송일시", "라이브중 시청수", "유니크 결제자수", "결제 상품수", "데이터 업데이트 시각"];
+  const columns = ["계정", "방송 ID", "방송 제목", "방송일시", "시청수", "유니크 결제자수", "결제 상품수", "데이터 업데이트 시각"];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   return `\ufeff${columns.map(quote).join(",")}\r\n${rows.map((row) => columns.map((column) => quote(row[column])).join(",")).join("\r\n")}`;
 }

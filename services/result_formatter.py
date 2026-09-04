@@ -43,7 +43,9 @@ def build_download_filename(
     """Build a readable result filename from the actual type and result dates."""
     if job_type == "weekly":
         label = {"external": "외장하드", "wearable": "웨어러블"}.get(weekly_kind, "위클리")
-        dates = safe_datetime_series(result["final"].get("날짜")).dropna()
+        dates = safe_datetime_series(
+            result["final"].attrs.get("broadcast_dates", result["final"].get("날짜"))
+        ).dropna()
     elif job_type == "detail":
         label = "워치9 사전판매"
         dates = safe_datetime_series(result["final"].get("결제일시")).dropna()

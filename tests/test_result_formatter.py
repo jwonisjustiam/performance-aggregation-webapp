@@ -35,6 +35,26 @@ def test_weekly_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> 
     path.write_bytes(content)
     assert validation["valid"]
     assert validate_saved_workbook(path, ["회차별 합계"])["valid"]
+    workbook = load_workbook(path, data_only=False)
+    try:
+        sheet = workbook["회차별 합계"]
+        assert sheet["A1"].value == "방송 정보"
+        assert sheet["R1"].value == "목표"
+        assert sheet["U1"].value == "실적"
+        assert sheet["AA1"].value == "AI라이브 대응"
+        assert [sheet.cell(2, column).value for column in range(18, 25)] == [
+            "View(만)", "수량", "금액(백만)", "View(만)", "수량", "전환율", "금액(백만)",
+        ]
+        assert sheet["R3"].value == pytest.approx(0.2)
+        assert sheet["S3"].value == pytest.approx(100.0)
+        assert sheet["T3"].value == pytest.approx(24.0)
+        assert sheet["Z3"].value == '=IFERROR(X3/T3*100,"")'
+        assert sheet.freeze_panes == "A3"
+        assert workbook.calculation.calcMode == "auto"
+        assert workbook.calculation.fullCalcOnLoad is True
+        assert workbook.calculation.forceFullCalc is True
+    finally:
+        workbook.close()
 
 
 def test_weekly_conversion_excel_format(weekly_frame: pd.DataFrame) -> None:
@@ -58,11 +78,11 @@ def test_weekly_conversion_excel_format(weekly_frame: pd.DataFrame) -> None:
     workbook = load_workbook(BytesIO(content), data_only=False)
     try:
         sheet = workbook["회차별 합계"]
-        headers = {cell.value: cell.column for cell in sheet[1]}
+        headers = {cell.value: cell.column for cell in sheet[2]}
         row = next(
             row_number
-            for row_number in range(2, sheet.max_row + 1)
-            if sheet.cell(row_number, headers["시간"]).value == "11:50"
+            for row_number in range(3, sheet.max_row + 1)
+            if sheet.cell(row_number, headers["시작 시간"]).value == "11:50"
         )
         cell = sheet.cell(row, headers["전환율"])
         assert cell.value == pytest.approx(2.5)

@@ -8,7 +8,7 @@ import tempfile
 
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from services.validator import validate_saved_workbook
 
@@ -36,6 +36,84 @@ def _style(path: Path, sheet_formats: dict[str, dict[str, str]]) -> None:
         workbook.close()
 
 
+def _style_weekly_report(path: Path) -> None:
+    """Apply grouped target/actual headers to the weekly output."""
+    workbook = load_workbook(path)
+    try:
+        sheet = workbook["회차별 합계"]
+        sheet.freeze_panes = "A3"
+        sheet.sheet_view.showGridLines = False
+        group_fill = PatternFill("solid", fgColor="FFF200")
+        info_fill = PatternFill("solid", fgColor="D9EAF7")
+        column_fill = PatternFill("solid", fgColor="E7E6E6")
+        input_fill = PatternFill("solid", fgColor="FFF2CC")
+        thin = Side(style="thin", color="7F7F7F")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        groups = [
+            ("A1:Q1", "방송 정보", info_fill),
+            ("R1:T1", "목표", group_fill),
+            ("U1:X1", "실적", group_fill),
+            ("Y1:Z1", "성과", group_fill),
+            ("AA1:AB1", "AI라이브 대응", group_fill),
+        ]
+        for cell_range, label, fill in groups:
+            sheet.merge_cells(cell_range)
+            cell = sheet[cell_range.split(":")[0]]
+            cell.value = label
+            cell.fill = fill
+            cell.font = Font(bold=True, color="C00000" if fill == group_fill else "1F1F1F")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            for row in sheet[cell_range]:
+                for item in row:
+                    item.border = border
+                    item.fill = fill
+
+        display_headers = [
+            "월", "일", "요일", "시작 시간", "duration", "ai 여부", "재방송여부", "채널", "방송주체",
+            "운영그룹", "운영파트", "삼성 담당자", "거래선1", "거래선2", "품목1", "품목2", "비고",
+            "View(만)", "수량", "금액(백만)", "View(만)", "수량", "전환율", "금액(백만)",
+            "비용률", "달성률", "제작(대행사)", "출연자1",
+        ]
+        for column, header in enumerate(display_headers, start=1):
+            cell = sheet.cell(2, column)
+            cell.value = header
+            cell.fill = column_fill
+            cell.font = Font(bold=True, color="1F1F1F")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = border
+
+        for row in range(3, sheet.max_row + 1):
+            for column in range(1, 29):
+                cell = sheet.cell(row, column)
+                cell.border = border
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                if 7 <= column <= 17:
+                    cell.fill = input_fill
+            sheet.cell(row, 18).number_format = "0.0"
+            sheet.cell(row, 19).number_format = "0.0"
+            sheet.cell(row, 20).number_format = "0.0"
+            sheet.cell(row, 21).number_format = "0.###"
+            sheet.cell(row, 22).number_format = "0"
+            sheet.cell(row, 23).number_format = '0.00"%"'
+            sheet.cell(row, 24).number_format = "0.###"
+            sheet.cell(row, 25).number_format = '0.00"%"'
+            sheet.cell(row, 26).value = f'=IFERROR(X{row}/T{row}*100,"")'
+            sheet.cell(row, 26).number_format = '0.00"%"'
+
+        widths = [5, 5, 6, 11, 10, 9, 12, 10, 11, 11, 11, 13, 10, 10, 15, 15, 12, 10, 9, 12, 10, 9, 10, 12, 9, 9, 13, 10]
+        for column, width in enumerate(widths, start=1):
+            sheet.column_dimensions[sheet.cell(2, column).column_letter].width = width
+        sheet.row_dimensions[1].height = 24
+        sheet.row_dimensions[2].height = 32
+        workbook.calculation.calcMode = "auto"
+        workbook.calculation.fullCalcOnLoad = True
+        workbook.calculation.forceFullCalc = True
+        workbook.save(path)
+    finally:
+        workbook.close()
+
+
 def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tuple[bytes, dict[str, object]]:
     """Create the required workbook, reopen it, and return bytes plus validation."""
     if job_type == "weekly":
@@ -48,7 +126,7 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
         path = Path(temporary) / "result.xlsx"
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             if job_type == "weekly":
-                result["final"].to_excel(writer, sheet_name="회차별 합계", index=False)
+                result["final"].to_excel(writer, sheet_name="회차별 합계", index=False, startrow=1)
             elif job_type == "detail":
                 result.get("basic", pd.DataFrame()).to_excel(writer, sheet_name="Basic", index=False)
                 result.get("wearable", pd.DataFrame()).to_excel(writer, sheet_name="웨어러블", index=False)
@@ -68,6 +146,8 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
                 "중복 주문 검증": {"주문 금액": "#,##0"},
             },
         )
+        if job_type == "weekly":
+            _style_weekly_report(path)
         validation = validate_saved_workbook(path, required, allow_empty_sheets=job_type == "detail")
         if not validation["valid"]:
             raise ValueError(f"결과 파일 검증 실패: {validation}")

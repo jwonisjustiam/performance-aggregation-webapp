@@ -17,6 +17,9 @@ REQUIRED = ("주문번호", "결제일시", "상품명")
 DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
 RESULT_KEYS = ("final", "summary", "excluded", "duplicates", "errors", "extra_details")
 CustomSlots = dict[date, tuple[object, ...]]
+WEEKLY_TARGET_VIEW = 0.2
+WEEKLY_TARGET_QUANTITY = 100.0
+WEEKLY_TARGET_AMOUNT_MILLIONS = 24.0
 
 
 def _slot_duration_minutes(slot: object) -> int:
@@ -331,17 +334,50 @@ def process_weekly(
             part = included[(included["_broadcast_date"] == broadcast_date) & (included["_slot"] == slot.label)]
             matched_stats = match_live_stats(live_stats, broadcast_date, slot.start)
             stats_audit.append(stats_audit_row(broadcast_date, slot.start, matched_stats))
+            live_viewers = None if matched_stats is None else pd.to_numeric(matched_stats.get("라이브중 시청수"), errors="coerce")
+            actual_view = None if live_viewers is None or pd.isna(live_viewers) else float(live_viewers) / 10_000
+            actual_quantity = int(part["_order_key"].nunique())
+            actual_amount = to_millions(part["_amount"].sum())
             rows.append(
                 {
-                    "날짜": broadcast_date,
-                    "시간": slot.start.strftime("%H:%M"),
-                    "duration (분)": _slot_duration_minutes(slot),
-                    "수량": int(part["_order_key"].nunique()),
-                    "전환율": conversion_percent(matched_stats),
-                    "금액(백만)": to_millions(part["_amount"].sum()),
+                    "월": broadcast_date.month,
+                    "일": broadcast_date.day,
+                    "요일": "월화수목금토일"[broadcast_date.weekday()],
+                    "시작 시간": slot.start.strftime("%H:%M"),
+                    "duration": _slot_duration_minutes(slot),
+                    "ai 여부": "AI",
+                    "재방송여부": "",
+                    "채널": "",
+                    "방송주체": "",
+                    "운영그룹": "",
+                    "운영파트": "",
+                    "삼성 담당자": "",
+                    "거래선1": "",
+                    "거래선2": "",
+                    "품목1": "",
+                    "품목2": "",
+                    "비고": "",
+                    "목표 View(만)": WEEKLY_TARGET_VIEW,
+                    "목표 수량": WEEKLY_TARGET_QUANTITY,
+                    "목표 금액(백만)": WEEKLY_TARGET_AMOUNT_MILLIONS,
+                    "실적 View(만)": actual_view,
+                    "실적 수량": actual_quantity,
+                    "실적 전환율": conversion_percent(matched_stats),
+                    "실적 금액(백만)": actual_amount,
+                    "비용률": None,
+                    "달성률": actual_amount / WEEKLY_TARGET_AMOUNT_MILLIONS * 100,
+                    "제작(대행사)": "KCI",
+                    "출연자1": "AI",
                 }
             )
-    final = pd.DataFrame(rows, columns=["날짜", "시간", "duration (분)", "수량", "전환율", "금액(백만)"])
+    final_columns = [
+        "월", "일", "요일", "시작 시간", "duration", "ai 여부", "재방송여부", "채널", "방송주체",
+        "운영그룹", "운영파트", "삼성 담당자", "거래선1", "거래선2", "품목1", "품목2", "비고",
+        "목표 View(만)", "목표 수량", "목표 금액(백만)", "실적 View(만)", "실적 수량", "실적 전환율",
+        "실적 금액(백만)", "비용률", "달성률", "제작(대행사)", "출연자1",
+    ]
+    final = pd.DataFrame(rows, columns=final_columns)
+    final.attrs["broadcast_dates"] = list(dates)
     return {
         "final": final,
         "summary": final.copy(),

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "쇼핑라이브 통계 수집기",
-  "version": "0.1.0",
-  "description": "로그인된 네이버 쇼핑라이브 목록에서 라이브중 시청수와 유니크 결제자수를 CSV로 저장합니다.",
-  "permissions": ["activeTab", "tabs", "downloads"],
+  "version": "0.1.6",
+  "description": "로그인된 네이버 쇼핑라이브의 시청/알림 통계 시청수와 유니크 결제자수를 CSV로 저장합니다.",
+  "permissions": ["activeTab", "tabs", "downloads", "scripting"],
   "host_permissions": ["https://sell.smartstore.naver.com/l/v1/*"],
   "background": {
     "service_worker": "background.js"

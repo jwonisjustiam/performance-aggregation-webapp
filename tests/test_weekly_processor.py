@@ -10,16 +10,16 @@ from services.excel_reader import canonicalize_columns
 
 def test_unique_order_count_and_multiple_line_amount(weekly_frame: pd.DataFrame) -> None:
     result = process_weekly(weekly_frame, "외장하드 주문.xlsx")
-    row = result["final"].query("시간 == '11:50'").iloc[0]
-    assert row["수량"] == 2
-    assert row["금액(백만)"] == 1.501
+    row = result["final"].query("`시작 시간` == '11:50'").iloc[0]
+    assert row["실적 수량"] == 2
+    assert row["실적 금액(백만)"] == 1.501
     assert result["extra_details"].empty
 
 
 def test_midnight_and_empty_slots_are_kept(weekly_frame: pd.DataFrame) -> None:
     result = process_weekly(weekly_frame, "외장하드 주문.xlsx")["final"]
-    assert result.query("시간 == '23:10'")["수량"].sum() == 1
-    assert (result["수량"] == 0).any()
+    assert result.query("`시작 시간` == '23:10'")["실적 수량"].sum() == 1
+    assert (result["실적 수량"] == 0).any()
 
 
 def test_weekly_conversion_uses_unique_payers_and_live_viewers(weekly_frame: pd.DataFrame) -> None:
@@ -39,24 +39,51 @@ def test_weekly_conversion_uses_unique_payers_and_live_viewers(weekly_frame: pd.
     )
 
     result = process_weekly(weekly_frame, "외장하드 주문.xlsx", live_stats=stats)
-    matched = result["final"].query("시간 == '11:50'").iloc[0]
-    unmatched = result["final"].query("시간 == '14:00'").iloc[0]
+    matched = result["final"].query("`시작 시간` == '11:50'").iloc[0]
+    unmatched = result["final"].query("`시작 시간` == '14:00'").iloc[0]
 
-    assert matched["전환율"] == pytest.approx(2.5)
-    assert pd.isna(unmatched["전환율"])
+    assert matched["실적 View(만)"] == pytest.approx(0.02)
+    assert matched["실적 전환율"] == pytest.approx(2.5)
+    assert pd.isna(unmatched["실적 전환율"])
+    assert matched["목표 View(만)"] == pytest.approx(0.2)
+    assert matched["목표 수량"] == pytest.approx(100.0)
+    assert matched["목표 금액(백만)"] == pytest.approx(24.0)
     assert result["live_stats"].query("`회차 시작 시간` == '11:50'").iloc[0]["매칭 여부"] == "매칭"
+
+
+def test_weekly_output_uses_target_and_actual_sections(weekly_frame: pd.DataFrame) -> None:
+    final = process_weekly(weekly_frame, "외장하드 주문.xlsx")["final"]
+    assert list(final.columns) == [
+        "월", "일", "요일", "시작 시간", "duration", "ai 여부", "재방송여부", "채널", "방송주체",
+        "운영그룹", "운영파트", "삼성 담당자", "거래선1", "거래선2", "품목1", "품목2", "비고",
+        "목표 View(만)", "목표 수량", "목표 금액(백만)", "실적 View(만)", "실적 수량", "실적 전환율",
+        "실적 금액(백만)", "비용률", "달성률", "제작(대행사)", "출연자1",
+    ]
+    manual_columns = [
+        "재방송여부", "채널", "방송주체", "운영그룹", "운영파트", "삼성 담당자",
+        "거래선1", "거래선2", "품목1", "품목2", "비고",
+    ]
+    assert final[manual_columns].fillna("").eq("").all().all()
+    assert set(final["목표 View(만)"]) == {0.2}
+    assert set(final["목표 수량"]) == {100.0}
+    assert set(final["목표 금액(백만)"]) == {24.0}
+    assert set(final["ai 여부"]) == {"AI"}
+    assert set(final["제작(대행사)"]) == {"KCI"}
+    assert set(final["출연자1"]) == {"AI"}
+    populated = final.query("`실적 금액(백만)` > 0").iloc[0]
+    assert populated["달성률"] == pytest.approx(populated["실적 금액(백만)"] / 24.0 * 100)
 
 
 def test_exact_duplicate_removed(weekly_frame: pd.DataFrame) -> None:
     duplicated = pd.concat([weekly_frame, weekly_frame.iloc[[0]]], ignore_index=True)
     result = process_weekly(duplicated, "외장하드.xlsx")
     assert len(result["duplicates"]) == 1
-    assert result["final"]["금액(백만)"].sum() == pytest.approx(1.502)
+    assert result["final"]["실적 금액(백만)"].sum() == pytest.approx(1.502)
 
 
 def test_shifted_live_detection(weekly_frame: pd.DataFrame) -> None:
     result = process_weekly(weekly_frame, "외장하드.xlsx")
-    assert result["final"]["수량"].sum() == 4
+    assert result["final"]["실적 수량"].sum() == 4
 
 
 def test_multiple_raw_files_are_combined_and_deduplicated(weekly_frame: pd.DataFrame) -> None:
@@ -65,7 +92,7 @@ def test_multiple_raw_files_are_combined_and_deduplicated(weekly_frame: pd.DataF
     combined = pd.concat([first, second], ignore_index=True)
     result = process_weekly(combined, "외장하드 1.xlsx | 외장하드 2.xlsx")
     assert len(result["duplicates"]) == 1
-    assert result["final"]["수량"].sum() == 4
+    assert result["final"]["실적 수량"].sum() == 4
 
 
 def test_mixed_weekly_file_types_are_rejected() -> None:
@@ -97,8 +124,8 @@ def test_manual_slots_override_naver_download_timestamp_in_file_name() -> None:
         custom_slots=custom_slots,
     )
 
-    assert set(result["final"]["날짜"]) == {date(2026, 7, 31)}
-    assert result["final"]["수량"].sum() == 1
+    assert set(map(tuple, result["final"][["월", "일"]].drop_duplicates().to_numpy())) == {(7, 31)}
+    assert result["final"]["실적 수량"].sum() == 1
     assert result["excluded"].empty
 
 
@@ -115,15 +142,13 @@ def test_period_file_outputs_all_target_dates_and_excludes_after_last_midnight_w
     )
     result = process_weekly(frame, "웨어러블 20260724~20260726 금~일 데이터 1.xlsx", "wearable")
     final = result["final"]
-    assert set(final["날짜"]) == {
-        pd.Timestamp("2026-07-24").date(),
-        pd.Timestamp("2026-07-25").date(),
-        pd.Timestamp("2026-07-26").date(),
+    assert set(map(tuple, final[["월", "일"]].drop_duplicates().to_numpy())) == {
+        (7, 24), (7, 25), (7, 26),
     }
-    assert final.groupby("날짜")["수량"].sum().to_dict() == {
-        pd.Timestamp("2026-07-24").date(): 1,
-        pd.Timestamp("2026-07-25").date(): 1,
-        pd.Timestamp("2026-07-26").date(): 2,
+    assert final.groupby(["월", "일"])["실적 수량"].sum().to_dict() == {
+        (7, 24): 1,
+        (7, 25): 1,
+        (7, 26): 2,
     }
     assert set(result["excluded"]["주문번호"]) == {"E"}
 
@@ -138,7 +163,7 @@ def test_product_order_number_duplicate_removed() -> None:
     )
     result = process_weekly(frame, "외장하드.xlsx")
     assert len(result["duplicates"]) == 1
-    assert result["final"]["금액(백만)"].sum() == pytest.approx(1)
+    assert result["final"]["실적 금액(백만)"].sum() == pytest.approx(1)
 
 
 def test_disabled_wearable_session_orders_are_excluded() -> None:
@@ -147,7 +172,7 @@ def test_disabled_wearable_session_orders_are_excluded() -> None:
         columns=["주문번호", "결제일시", "상품명", "수량", "상품가격", "옵션가격", "주문 유입경로"],
     )
     result = process_weekly(frame, "웨어러블.xlsx")
-    assert result["final"].query("시간 == '13:50'")["수량"].iloc[0] == 0
+    assert result["final"].query("`시작 시간` == '13:50'")["실적 수량"].iloc[0] == 0
     assert len(result["excluded"]) == 1
 
 
@@ -227,4 +252,4 @@ def test_weekly_optional_sku_filter_uses_product_name_code() -> None:
         "wearable",
         allowed_skus={"SM-L350NZKAKOO"},
     )
-    assert result["final"]["수량"].sum() == 1
+    assert result["final"]["실적 수량"].sum() == 1

@@ -99,3 +99,37 @@ def test_detail_workbook_sheet_is_created() -> None:
     finally:
         workbook.close()
         path.unlink(missing_ok=True)
+
+
+def test_result_preview_copies_formulas_without_changing_export_numbers():
+    from app import build_result_preview
+
+    source = pd.DataFrame({
+        "실적 전환율": [0.005, 0, None, 0.12345],
+        "달성률": [0.1, 0, None, 1.25],
+        "실적 수량": [1, 0, 0, 5],
+    })
+    original = source.copy(deep=True)
+    preview = build_result_preview(source)
+    assert preview["실적 전환율"].tolist() == [f"=AE{row}/(AD{row}*10000)" for row in range(8, 12)]
+    assert preview["달성률"].tolist() == [f"=AG{row}/AC{row}" for row in range(8, 12)]
+    assert "=AE8/(AD8*10000)\t=AG8/AC8" in preview.to_csv(sep="\t", index=False)
+    pd.testing.assert_frame_equal(source, original)
+    pd.testing.assert_series_equal(preview["실적 수량"], source["실적 수량"])
+
+
+def test_result_preview_without_ratio_columns_is_unchanged():
+    from app import build_result_preview
+
+    source = pd.DataFrame({"실적 수량": [1, 2]})
+    pd.testing.assert_frame_equal(build_result_preview(source), source)
+
+
+def test_result_preview_formulas_use_positions_not_dataframe_index():
+    from app import build_result_preview
+
+    source = pd.DataFrame({"실적 전환율": [0.01, None], "달성률": [0.1, 0]}, index=[20, 40])
+    preview = build_result_preview(source)
+    assert preview.loc[20, "실적 전환율"] == "=AE8/(AD8*10000)"
+    assert preview.loc[40, "달성률"] == "=AG9/AC9"
+    assert build_result_preview(source.iloc[:0]).empty

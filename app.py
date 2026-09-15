@@ -21,6 +21,19 @@ from services.time_slotter import slots_for_date
 from services.validator import input_diagnostics
 from rules.weekly_rules import SlotRule
 
+def build_result_preview(frame: pd.DataFrame) -> pd.DataFrame:
+    """Copy Excel formulas referencing the target template, starting at row 8."""
+    preview = frame.copy()
+    formulas = {
+        "실적 전환율": "=AE{row}/(AD{row}*10000)",
+        "달성률": "=AG{row}/AC{row}",
+    }
+    for column, formula in formulas.items():
+        if column in preview.columns:
+            preview[column] = [formula.format(row=row) for row in range(8, 8 + len(preview))]
+    return preview
+
+
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_SAMSUNG_MODEL_PREFIXES = ("SM-",)
 CustomSlots = dict[date, tuple[SlotRule, ...]]
@@ -541,7 +554,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-09-15 일정별 실제 양식 열 배치·수식 계산값 저장")
+    st.caption("배포 버전: 2026-09-15 일정별 미리보기 복사 수식 반영 v3")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -795,9 +808,9 @@ def show_result(
         st.subheader("최종 결과 미리보기")
         if result["final"].empty:
             st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
-        preview = result["final"]
-        if "실적 전환율" in preview.columns:
-            preview = preview.style.format({column: "{:.2%}" for column in ("실적 전환율", "달성률") if column in preview.columns}, na_rep="")
+        if "실적 전환율" in result["final"].columns:
+            st.caption("전환율·달성률은 엑셀 복사용 수식입니다. 첫 행은 대상 양식의 8행을 참조합니다. 전환율은 AF8, 달성률은 AI8부터 붙여넣으세요. 대상 셀의 백분율 서식을 유지하세요.")
+        preview = build_result_preview(result["final"])
         st.dataframe(preview, use_container_width=True)
         stats_audit = result.get("live_stats", pd.DataFrame())
         if not stats_audit.empty:

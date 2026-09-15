@@ -381,7 +381,7 @@ def process_weekly(
                     "실적 전환율": actual_conversion,
                     "실적 금액(백만)": actual_amount,
                     "비용률": None,
-                    "달성률": None,
+                    "달성률": actual_amount / defaults["목표 금액(백만)"],
                     "제작(대행사)": "쇼마젠시",
                     "출연자1": "AI",
                 }

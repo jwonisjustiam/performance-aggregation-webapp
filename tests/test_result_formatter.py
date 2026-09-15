@@ -38,23 +38,24 @@ def test_weekly_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> 
     workbook = load_workbook(path, data_only=False)
     try:
         sheet = workbook["회차별 합계"]
-        assert sheet["A1"].value == "방송 정보"
-        assert sheet["R1"].value == "목표"
-        assert sheet["U1"].value == "실적"
-        assert sheet["AA1"].value == "AI라이브 대응"
-        assert [sheet.cell(2, column).value for column in range(18, 25)] == [
+        assert sheet["J6"].value == "방송 정보"
+        assert sheet["AA6"].value == "목표"
+        assert sheet["AD6"].value == "실적"
+        assert sheet["AJ6"].value == "AI라이브 대응"
+        assert [sheet.cell(7, column).value for column in range(27, 34)] == [
             "View(만)", "수량", "금액(백만)", "View(만)", "수량", "전환율", "금액(백만)",
         ]
-        assert sheet["R3"].value == pytest.approx(0.1)
-        assert sheet["S3"].value == pytest.approx(50)
-        assert sheet["T3"].value == pytest.approx(10)
-        assert sheet["Z3"].value is None
-        assert sheet["AA3"].value == "쇼마젠시"
-        for row in range(3, sheet.max_row + 1):
-            assert sheet.cell(row, 23).value == f"=V{row}/(U{row}*10000)"
-            assert sheet.cell(row, 23).number_format == "0.00%"
-            assert sheet.cell(row, 26).value is None
-        assert sheet.freeze_panes == "A3"
+        assert sheet["AA8"].value == pytest.approx(0.1)
+        assert sheet["AB8"].value == pytest.approx(50)
+        assert sheet["AC8"].value == pytest.approx(10)
+        assert sheet["AI8"].value == "=AG8/AC8"
+        assert sheet["AJ8"].value == "쇼마젠시"
+        for row in range(8, sheet.max_row + 1):
+            assert sheet.cell(row, 32).value == f"=AE{row}/(AD{row}*10000)"
+            assert sheet.cell(row, 32).number_format == "0.00%"
+            assert sheet.cell(row, 35).value == f"=AG{row}/AC{row}"
+            assert sheet.cell(row, 35).number_format == "0.00%"
+        assert sheet.freeze_panes == "J8"
         assert workbook.calculation.calcMode == "auto"
         assert workbook.calculation.fullCalcOnLoad is True
         assert workbook.calculation.forceFullCalc is True
@@ -83,14 +84,14 @@ def test_weekly_conversion_excel_format(weekly_frame: pd.DataFrame) -> None:
     workbook = load_workbook(BytesIO(content), data_only=False)
     try:
         sheet = workbook["회차별 합계"]
-        headers = {cell.value: cell.column for cell in sheet[2]}
+        headers = {cell.value: cell.column for cell in sheet[7]}
         row = next(
             row_number
-            for row_number in range(3, sheet.max_row + 1)
+            for row_number in range(8, sheet.max_row + 1)
             if sheet.cell(row_number, headers["시작 시간"]).value == "11:50"
         )
         cell = sheet.cell(row, headers["전환율"])
-        assert cell.value == f"=V{row}/(U{row}*10000)"
+        assert cell.value == f"=AE{row}/(AD{row}*10000)"
         assert cell.number_format == "0.00%"
     finally:
         workbook.close()

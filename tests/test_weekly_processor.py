@@ -70,7 +70,7 @@ def test_weekly_output_uses_target_and_actual_sections(weekly_frame: pd.DataFram
     assert set(final["ai 여부"]) == {"AI"}
     assert set(final["제작(대행사)"]) == {"쇼마젠시"}
     assert set(final["출연자1"]) == {"AI"}
-    assert final["달성률"].isna().all()
+    assert final["달성률"].eq(final["실적 금액(백만)"] / final["목표 금액(백만)"]).all()
 
 
 @pytest.mark.parametrize("viewers", [None, 0, 200])
@@ -295,9 +295,9 @@ def test_weekly_defaults_in_preview_and_download(weekly_frame, kind, filename, e
     workbook = load_workbook(BytesIO(content), data_only=False)
     try:
         sheet = workbook["회차별 합계"]
-        assert sheet.max_column == 28
-        for row in range(3, sheet.max_row + 1):
+        assert sheet.max_column == 37
+        for row in range(8, sheet.max_row + 1):
             for column, value in defaults.items():
-                assert sheet.cell(row, final.columns.get_loc(column) + 1).value == value
+                assert sheet.cell(row, final.columns.get_loc(column) + 10).value == value
     finally:
         workbook.close()

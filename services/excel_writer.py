@@ -40,7 +40,7 @@ def _style_weekly_report(path: Path) -> None:
     workbook = load_workbook(path)
     try:
         sheet = workbook["회차별 합계"]
-        sheet.freeze_panes = "A3"
+        sheet.freeze_panes = "J8"
         sheet.sheet_view.showGridLines = False
         group_fill = PatternFill("solid", fgColor="FFF200")
         info_fill = PatternFill("solid", fgColor="D9EAF7")
@@ -50,11 +50,11 @@ def _style_weekly_report(path: Path) -> None:
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
         groups = [
-            ("A1:Q1", "방송 정보", info_fill),
-            ("R1:T1", "목표", group_fill),
-            ("U1:X1", "실적", group_fill),
-            ("Y1:Z1", "성과", group_fill),
-            ("AA1:AB1", "AI라이브 대응", group_fill),
+            ("J6:Z6", "방송 정보", info_fill),
+            ("AA6:AC6", "목표", group_fill),
+            ("AD6:AG6", "실적", group_fill),
+            ("AH6:AI6", "성과", group_fill),
+            ("AJ6:AK6", "AI라이브 대응", group_fill),
         ]
         for cell_range, label, fill in groups:
             sheet.merge_cells(cell_range)
@@ -74,38 +74,38 @@ def _style_weekly_report(path: Path) -> None:
             "View(만)", "수량", "금액(백만)", "View(만)", "수량", "전환율", "금액(백만)",
             "비용률", "달성률", "제작(대행사)", "출연자1",
         ]
-        for column, header in enumerate(display_headers, start=1):
-            cell = sheet.cell(2, column)
+        for column, header in enumerate(display_headers, start=10):
+            cell = sheet.cell(7, column)
             cell.value = header
             cell.fill = column_fill
             cell.font = Font(bold=True, color="1F1F1F")
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = border
 
-        for row in range(3, sheet.max_row + 1):
-            for column in range(1, 29):
+        for row in range(8, sheet.max_row + 1):
+            for column in range(10, 38):
                 cell = sheet.cell(row, column)
                 cell.border = border
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-                if 7 <= column <= 17:
+                if 16 <= column <= 26:
                     cell.fill = input_fill
-            sheet.cell(row, 18).number_format = "0.0"
-            sheet.cell(row, 19).number_format = "0.0"
-            sheet.cell(row, 20).number_format = "0.0"
-            sheet.cell(row, 21).number_format = "0.###"
-            sheet.cell(row, 22).number_format = "0"
-            sheet.cell(row, 23).value = f"=V{row}/(U{row}*10000)"
-            sheet.cell(row, 23).number_format = "0.00%"
-            sheet.cell(row, 24).number_format = "0.###"
-            sheet.cell(row, 25).number_format = '0.00"%"'
-            sheet.cell(row, 26).value = None
-            sheet.cell(row, 26).number_format = "0.00%"
+            sheet.cell(row, 27).number_format = "0.0"
+            sheet.cell(row, 28).number_format = "0.0"
+            sheet.cell(row, 29).number_format = "0.0"
+            sheet.cell(row, 30).number_format = "0.###"
+            sheet.cell(row, 31).number_format = "0"
+            sheet.cell(row, 32).value = f"=AE{row}/(AD{row}*10000)"
+            sheet.cell(row, 32).number_format = "0.00%"
+            sheet.cell(row, 33).number_format = "0.###"
+            sheet.cell(row, 34).number_format = '0.00"%"'
+            sheet.cell(row, 35).value = f"=AG{row}/AC{row}"
+            sheet.cell(row, 35).number_format = "0.00%"
 
         widths = [5, 5, 6, 11, 10, 9, 12, 10, 11, 11, 11, 13, 10, 10, 15, 15, 12, 10, 9, 12, 10, 9, 10, 12, 9, 9, 13, 10]
-        for column, width in enumerate(widths, start=1):
-            sheet.column_dimensions[sheet.cell(2, column).column_letter].width = width
-        sheet.row_dimensions[1].height = 24
-        sheet.row_dimensions[2].height = 32
+        for column, width in enumerate(widths, start=10):
+            sheet.column_dimensions[sheet.cell(7, column).column_letter].width = width
+        sheet.row_dimensions[6].height = 24
+        sheet.row_dimensions[7].height = 32
         workbook.calculation.calcMode = "auto"
         workbook.calculation.fullCalcOnLoad = True
         workbook.calculation.forceFullCalc = True
@@ -126,7 +126,7 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
         path = Path(temporary) / "result.xlsx"
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             if job_type == "weekly":
-                result["final"].to_excel(writer, sheet_name="회차별 합계", index=False, startrow=1)
+                result["final"].to_excel(writer, sheet_name="회차별 합계", index=False, startrow=6, startcol=9)
             elif job_type == "detail":
                 result.get("basic", pd.DataFrame()).to_excel(writer, sheet_name="Basic", index=False)
                 result.get("wearable", pd.DataFrame()).to_excel(writer, sheet_name="웨어러블", index=False)
@@ -135,19 +135,20 @@ def create_result_workbook(job_type: str, result: dict[str, pd.DataFrame]) -> tu
                 result["final"].to_excel(writer, sheet_name="통합 실적표", index=False)
                 result["summary"].to_excel(writer, sheet_name="회차별 합계", index=False)
                 result["duplicates"].to_excel(writer, sheet_name="중복 주문 검증", index=False)
-        _style(
-            path,
-            {
-                "회차별 합계": {"금액(백만)": "0.###", "총 금액": "#,##0", "duration (분)": "0", "수량": "0", "전환율": '0.00"%"'},
-                "Basic": {"금액": "#,##0", "주문번호": "@"},
-                "웨어러블": {"금액": "#,##0", "주문번호": "@"},
-                "모바일 ACC": {"금액": "#,##0", "주문번호": "@"},
-                "통합 실적표": {"실적(대)": "0", "Duration (분)": "0", "DURATION (분)": "0", "View(만)": "0.###"},
-                "중복 주문 검증": {"주문 금액": "#,##0"},
-            },
-        )
         if job_type == "weekly":
             _style_weekly_report(path)
+        else:
+            _style(
+                path,
+                {
+                    "회차별 합계": {"금액(백만)": "0.###", "총 금액": "#,##0", "duration (분)": "0", "수량": "0", "전환율": '0.00"%"'},
+                    "Basic": {"금액": "#,##0", "주문번호": "@"},
+                    "웨어러블": {"금액": "#,##0", "주문번호": "@"},
+                    "모바일 ACC": {"금액": "#,##0", "주문번호": "@"},
+                    "통합 실적표": {"실적(대)": "0", "Duration (분)": "0", "DURATION (분)": "0", "View(만)": "0.###"},
+                    "중복 주문 검증": {"주문 금액": "#,##0"},
+                },
+            )
         validation = validate_saved_workbook(path, required, allow_empty_sheets=job_type == "detail")
         if not validation["valid"]:
             raise ValueError(f"결과 파일 검증 실패: {validation}")

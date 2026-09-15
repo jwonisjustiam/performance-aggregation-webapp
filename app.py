@@ -541,7 +541,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-09-15 일정별 유형별·공통 기본값 반영")
+    st.caption("배포 버전: 2026-09-15 일정별 J8 배치·전환율 및 달성률 자동 수식")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -797,7 +797,7 @@ def show_result(
             st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
         preview = result["final"]
         if "실적 전환율" in preview.columns:
-            preview = preview.style.format({"실적 전환율": "{:.2%}"}, na_rep="")
+            preview = preview.style.format({column: "{:.2%}" for column in ("실적 전환율", "달성률") if column in preview.columns}, na_rep="")
         st.dataframe(preview, use_container_width=True)
         stats_audit = result.get("live_stats", pd.DataFrame())
         if not stats_audit.empty:

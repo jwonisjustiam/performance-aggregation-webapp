@@ -274,9 +274,9 @@ def test_weekly_optional_sku_filter_uses_product_name_code() -> None:
 
 
 @pytest.mark.parametrize("kind,filename,expected", [
-    ("external", "주문.xlsx", ("PP1", "NC", "Y3", "\\", 0.1, 50, 10)),
+    ("external", "주문.xlsx", ("PP1", "NC", "Y3", "", 0.1, 50, 10)),
     ("wearable", "주문.xlsx", ("PP2", "모바일2", "갤럭시워치9", "갤럭시링", 0.2, 100, 24)),
-    (None, "외장하드.xlsx", ("PP1", "NC", "Y3", "\\", 0.1, 50, 10)),
+    (None, "외장하드.xlsx", ("PP1", "NC", "Y3", "", 0.1, 50, 10)),
     (None, "웨어러블.xlsx", ("PP2", "모바일2", "갤럭시워치9", "갤럭시링", 0.2, 100, 24)),
 ])
 def test_weekly_defaults_in_preview_and_download(weekly_frame, kind, filename, expected):
@@ -295,9 +295,10 @@ def test_weekly_defaults_in_preview_and_download(weekly_frame, kind, filename, e
     workbook = load_workbook(BytesIO(content), data_only=False)
     try:
         sheet = workbook["회차별 합계"]
-        assert sheet.max_column == 37
+        assert sheet.max_column == 39
         for row in range(8, sheet.max_row + 1):
             for column, value in defaults.items():
-                assert sheet.cell(row, final.columns.get_loc(column) + 10).value == value
+                from services.excel_writer import WEEKLY_EXCEL_COLUMNS
+                assert sheet[f"{WEEKLY_EXCEL_COLUMNS[column]}{row}"].value == (None if value == "" else value)
     finally:
         workbook.close()

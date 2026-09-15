@@ -18,7 +18,7 @@ DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
 CustomSlots = dict[date, tuple[object, ...]]
 WEEKLY_DEFAULTS = {
     "external": {
-        "운영그룹": "PP1", "운영파트": "NC", "품목1": "Y3", "품목2": "\\",
+        "운영그룹": "PP1", "운영파트": "NC", "품목1": "Y3", "품목2": "",
         "목표 View(만)": 0.1, "목표 수량": 50, "목표 금액(백만)": 10,
     },
     "wearable": {

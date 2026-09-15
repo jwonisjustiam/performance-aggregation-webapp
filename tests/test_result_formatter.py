@@ -45,9 +45,9 @@ def test_weekly_workbook_reopens(tmp_path: Path, weekly_frame: pd.DataFrame) -> 
         assert [sheet.cell(2, column).value for column in range(18, 25)] == [
             "View(만)", "수량", "금액(백만)", "View(만)", "수량", "전환율", "금액(백만)",
         ]
-        assert sheet["R3"].value == pytest.approx(0.2)
-        assert sheet["S3"].value == pytest.approx(100.0)
-        assert sheet["T3"].value == pytest.approx(24.0)
+        assert sheet["R3"].value == pytest.approx(0.1)
+        assert sheet["S3"].value == pytest.approx(50)
+        assert sheet["T3"].value == pytest.approx(10)
         assert sheet["Z3"].value is None
         assert sheet["AA3"].value == "쇼마젠시"
         for row in range(3, sheet.max_row + 1):

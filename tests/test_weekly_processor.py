@@ -46,9 +46,9 @@ def test_weekly_conversion_uses_actual_quantity_and_views(weekly_frame: pd.DataF
     assert matched["실적 전환율"] == pytest.approx(2 / 200)
     assert pd.isna(unmatched["실적 전환율"])
     assert result["live_stats"].query("`회차 시작 시간` == '11:50'").iloc[0]["실적 전환율(%)"] == pytest.approx(1.0)
-    assert matched["목표 View(만)"] == pytest.approx(0.2)
-    assert matched["목표 수량"] == pytest.approx(100.0)
-    assert matched["목표 금액(백만)"] == pytest.approx(24.0)
+    assert matched["목표 View(만)"] == pytest.approx(0.1)
+    assert matched["목표 수량"] == pytest.approx(50)
+    assert matched["목표 금액(백만)"] == pytest.approx(10)
     assert result["live_stats"].query("`회차 시작 시간` == '11:50'").iloc[0]["매칭 여부"] == "매칭"
 
 
@@ -61,13 +61,12 @@ def test_weekly_output_uses_target_and_actual_sections(weekly_frame: pd.DataFram
         "실적 금액(백만)", "비용률", "달성률", "제작(대행사)", "출연자1",
     ]
     manual_columns = [
-        "재방송여부", "채널", "방송주체", "운영그룹", "운영파트", "삼성 담당자",
-        "거래선1", "거래선2", "품목1", "품목2", "비고",
+        "재방송여부", "삼성 담당자", "거래선2", "비고",
     ]
     assert final[manual_columns].fillna("").eq("").all().all()
-    assert set(final["목표 View(만)"]) == {0.2}
-    assert set(final["목표 수량"]) == {100.0}
-    assert set(final["목표 금액(백만)"]) == {24.0}
+    assert set(final["목표 View(만)"]) == {0.1}
+    assert set(final["목표 수량"]) == {50}
+    assert set(final["목표 금액(백만)"]) == {10}
     assert set(final["ai 여부"]) == {"AI"}
     assert set(final["제작(대행사)"]) == {"쇼마젠시"}
     assert set(final["출연자1"]) == {"AI"}
@@ -272,3 +271,33 @@ def test_weekly_optional_sku_filter_uses_product_name_code() -> None:
         allowed_skus={"SM-L350NZKAKOO"},
     )
     assert result["final"]["실적 수량"].sum() == 1
+
+
+@pytest.mark.parametrize("kind,filename,expected", [
+    ("external", "주문.xlsx", ("PP1", "NC", "Y3", "\\", 0.1, 50, 10)),
+    ("wearable", "주문.xlsx", ("PP2", "모바일2", "갤럭시워치9", "갤럭시링", 0.2, 100, 24)),
+    (None, "외장하드.xlsx", ("PP1", "NC", "Y3", "\\", 0.1, 50, 10)),
+    (None, "웨어러블.xlsx", ("PP2", "모바일2", "갤럭시워치9", "갤럭시링", 0.2, 100, 24)),
+])
+def test_weekly_defaults_in_preview_and_download(weekly_frame, kind, filename, expected):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from app import analyze_frame
+
+    result, content, *_ = analyze_frame("weekly", kind, weekly_frame, filename, [])
+    columns = ["운영그룹", "운영파트", "품목1", "품목2", "목표 View(만)", "목표 수량", "목표 금액(백만)"]
+    defaults = dict(zip(columns, expected))
+    defaults.update({"채널": "네이버", "방송주체": "SOP", "거래선1": "쇼마젠시", "제작(대행사)": "쇼마젠시", "출연자1": "AI"})
+    final = result["final"]
+    assert not final.empty
+    for column, value in defaults.items():
+        assert final[column].eq(value).all()
+    workbook = load_workbook(BytesIO(content), data_only=False)
+    try:
+        sheet = workbook["회차별 합계"]
+        assert sheet.max_column == 28
+        for row in range(3, sheet.max_row + 1):
+            for column, value in defaults.items():
+                assert sheet.cell(row, final.columns.get_loc(column) + 1).value == value
+    finally:
+        workbook.close()

@@ -15,11 +15,17 @@ from services.validator import missing_columns
 
 REQUIRED = ("주문번호", "결제일시", "상품명")
 DETAIL_REQUIRED = ("주문번호", "결제일시", "상품명")
-RESULT_KEYS = ("final", "summary", "excluded", "duplicates", "errors", "extra_details")
 CustomSlots = dict[date, tuple[object, ...]]
-WEEKLY_TARGET_VIEW = 0.2
-WEEKLY_TARGET_QUANTITY = 100.0
-WEEKLY_TARGET_AMOUNT_MILLIONS = 24.0
+WEEKLY_DEFAULTS = {
+    "external": {
+        "운영그룹": "PP1", "운영파트": "NC", "품목1": "Y3", "품목2": "\\",
+        "목표 View(만)": 0.1, "목표 수량": 50, "목표 금액(백만)": 10,
+    },
+    "wearable": {
+        "운영그룹": "PP2", "운영파트": "모바일2", "품목1": "갤럭시워치9", "품목2": "갤럭시링",
+        "목표 View(만)": 0.2, "목표 수량": 100, "목표 금액(백만)": 24,
+    },
+}
 
 
 def _slot_duration_minutes(slot: object) -> int:
@@ -325,6 +331,7 @@ def process_weekly(
 ) -> dict[str, pd.DataFrame]:
     """Aggregate a weekly raw-order dataframe by broadcast date and slot."""
     kind, source, included, excluded, duplicates, errors = _prepare_weekly_source(raw_df, file_name, selected_type, allowed_skus, custom_slots)
+    defaults = WEEKLY_DEFAULTS[kind]
     dates = source.attrs.get("target_dates") or sorted(date_value for date_value in source["_broadcast_date"].dropna().unique())
     rows: list[dict[str, object]] = []
     stats_audit: list[dict[str, object]] = []
@@ -356,19 +363,19 @@ def process_weekly(
                     "duration": _slot_duration_minutes(slot),
                     "ai 여부": "AI",
                     "재방송여부": "",
-                    "채널": "",
-                    "방송주체": "",
-                    "운영그룹": "",
-                    "운영파트": "",
+                    "채널": "네이버",
+                    "방송주체": "SOP",
+                    "운영그룹": defaults["운영그룹"],
+                    "운영파트": defaults["운영파트"],
                     "삼성 담당자": "",
-                    "거래선1": "",
+                    "거래선1": "쇼마젠시",
                     "거래선2": "",
-                    "품목1": "",
-                    "품목2": "",
+                    "품목1": defaults["품목1"],
+                    "품목2": defaults["품목2"],
                     "비고": "",
-                    "목표 View(만)": WEEKLY_TARGET_VIEW,
-                    "목표 수량": WEEKLY_TARGET_QUANTITY,
-                    "목표 금액(백만)": WEEKLY_TARGET_AMOUNT_MILLIONS,
+                    "목표 View(만)": defaults["목표 View(만)"],
+                    "목표 수량": defaults["목표 수량"],
+                    "목표 금액(백만)": defaults["목표 금액(백만)"],
                     "실적 View(만)": actual_view,
                     "실적 수량": actual_quantity,
                     "실적 전환율": actual_conversion,

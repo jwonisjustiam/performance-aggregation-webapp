@@ -541,7 +541,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-09-04 일정별 전환율 수식·쇼마젠시·달성률 공란")
+    st.caption("배포 버전: 2026-09-15 일정별 유형별·공통 기본값 반영")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")

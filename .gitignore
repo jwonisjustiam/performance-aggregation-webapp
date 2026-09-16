@@ -11,3 +11,5 @@ samples/weekly/*.xlsx
 samples/samsung/*.xlsx
 *.log
 *.png
+
+.test-deps/

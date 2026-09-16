@@ -22,15 +22,15 @@ from services.validator import input_diagnostics
 from rules.weekly_rules import SlotRule
 
 def build_result_preview(frame: pd.DataFrame) -> pd.DataFrame:
-    """Copy Excel formulas referencing the target template, starting at row 8."""
+    """Copy formulas that evaluate against the destination row in Excel."""
     preview = frame.copy()
     formulas = {
-        "실적 전환율": "=AE{row}/(AD{row}*10000)",
-        "달성률": "=AG{row}/AC{row}",
+        "실적 전환율": "=INDEX(AE:AE,ROW())/(INDEX(AD:AD,ROW())*10000)",
+        "달성률": "=INDEX(AG:AG,ROW())/INDEX(AC:AC,ROW())",
     }
     for column, formula in formulas.items():
         if column in preview.columns:
-            preview[column] = [formula.format(row=row) for row in range(8, 8 + len(preview))]
+            preview[column] = formula
     return preview
 
 
@@ -554,7 +554,7 @@ def main() -> None:
 
     st.title(selected_job["title"])
     st.caption(selected_job["caption"])
-    st.caption("배포 버전: 2026-09-15 일정별 미리보기 복사 수식 반영 v3")
+    st.caption("배포 버전: 2026-09-15 일정별 누적 붙여넣기 현재 행 수식 v4")
     render_usage_guide()
 
     st.subheader(f"{selected_job['title']} Raw Data 업로드")
@@ -809,7 +809,7 @@ def show_result(
         if result["final"].empty:
             st.warning("분류 조건에 맞는 결과 행이 없습니다. 입력 파일의 옵션 관리 코드 또는 판매자 상품 코드를 확인해주세요.")
         if "실적 전환율" in result["final"].columns:
-            st.caption("전환율·달성률은 엑셀 복사용 수식입니다. 첫 행은 대상 양식의 8행을 참조합니다. 전환율은 AF8, 달성률은 AI8부터 붙여넣으세요. 대상 셀의 백분율 서식을 유지하세요.")
+            st.caption("전환율·달성률은 엑셀 복사용 수식입니다. 붙여넣은 행을 자동으로 참조합니다. 전환율은 AF열, 달성률은 AI열의 원하는 행부터 붙여넣으세요. 대상 셀의 백분율 서식을 유지하세요.")
         preview = build_result_preview(result["final"])
         st.dataframe(preview, use_container_width=True)
         stats_audit = result.get("live_stats", pd.DataFrame())
